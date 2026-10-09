@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizePhoneE164, buildWhatsAppMessage } from '../src/lib/whatsapp';
+import { normalizePhoneE164, buildWhatsAppMessage, getWhatsAppUrl } from '../src/lib/whatsapp';
 import { Invoice, InvoiceItem, Voucher, Gift } from '../src/types';
 
 describe('WhatsApp Formatting & Normalization Tests', () => {
@@ -22,6 +22,32 @@ describe('WhatsApp Formatting & Normalization Tests', () => {
     expect(normalizePhoneE164('12345')).toBeNull();
     expect(normalizePhoneE164('abcdefghij')).toBeNull();
     expect(normalizePhoneE164('')).toBeNull();
+  });
+
+  it('Generates correct WhatsApp URLs ensuring country code +91 is always present', () => {
+    const msg = 'Test message';
+    const encoded = encodeURIComponent(msg);
+
+    // 10-digit raw number typed by cashier
+    expect(getWhatsAppUrl('9876543210', msg)).toBe(`https://wa.me/919876543210?text=${encoded}`);
+
+    // With leading 0 (local trunk dial)
+    expect(getWhatsAppUrl('09876543210', msg)).toBe(`https://wa.me/919876543210?text=${encoded}`);
+
+    // With +91
+    expect(getWhatsAppUrl('+919876543210', msg)).toBe(`https://wa.me/919876543210?text=${encoded}`);
+
+    // With spaces
+    expect(getWhatsAppUrl('98765 43210', msg)).toBe(`https://wa.me/919876543210?text=${encoded}`);
+
+    // With already included 91 prefix without plus
+    expect(getWhatsAppUrl('919876543210', msg)).toBe(`https://wa.me/919876543210?text=${encoded}`);
+
+    // International number
+    expect(getWhatsAppUrl('+14155552671', msg)).toBe(`https://wa.me/14155552671?text=${encoded}`);
+
+    // Empty or falsy falls back to open chat selector
+    expect(getWhatsAppUrl('', msg)).toBe(`https://wa.me/?text=${encoded}`);
   });
 
   it('Formats items with quantity > 1 according to PRD format', () => {

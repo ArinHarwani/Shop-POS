@@ -64,6 +64,7 @@ export default function SellPage() {
   // Completed sale summary
   const [completedSale, setCompletedSale] = useState<{
     billNumber: string;
+    customerPhone: string;
     total: number;
     subtotal: number;
     discountAmount: number;
@@ -304,6 +305,7 @@ export default function SellPage() {
       setSoldItems([...cart]);
       setCompletedSale({
         billNumber: result.invoice_number,
+        customerPhone: cleanPhone,
         total: result.grand_total,
         subtotal: result.subtotal,
         discountAmount: result.discount_total,
@@ -795,7 +797,8 @@ export default function SellPage() {
                       gift: completedSale.gift ? { id: 'g', source_invoice_id: '', customer_id: '', description: completedSale.gift, status: completedSale.giftClaimed ? 'COLLECTED' : 'PENDING_COLLECTION' } : null,
                       giftClaimed: completedSale.giftClaimed,
                     });
-                    const url = getWhatsAppUrl(phone || '9876543210', message);
+                    const recipientPhone = completedSale.customerPhone || phone || '9876543210';
+                    const url = getWhatsAppUrl(recipientPhone, message);
                     window.open(url, '_blank');
                   }}
                 >
@@ -901,7 +904,7 @@ export default function SellPage() {
 
                 {/* 4. Send SMS */}
                 <a
-                  href={getSmsUrl(phone || '9876543210', `FEVER Bill ${completedSale.billNumber}: Total ${formatRupees(completedSale.total)}`)}
+                  href={getSmsUrl(completedSale.customerPhone || phone || '9876543210', `FEVER Bill ${completedSale.billNumber}: Total ${formatRupees(completedSale.total)}`)}
                   className="min-h-[52px] px-5 py-3 rounded-[8px] font-semibold text-[17px] flex items-center justify-center gap-2 border bg-[#F6F6F4] text-[#1A1A1A] border-[#E6E6E6] hover:bg-[#EFEFEA]"
                 >
                   {STRINGS.sendSmsBtn}

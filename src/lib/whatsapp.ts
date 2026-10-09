@@ -154,11 +154,30 @@ export function buildWhatsAppMessage(options: BuildMessageOptions): string {
 }
 
 /**
- * Creates the https://wa.me/<number>?text=<encoded> URL
+ * Creates the https://wa.me/<number>?text=<encoded> URL.
+ * Automatically ensures full international format with country code (e.g. 91 for India).
  */
-export function getWhatsAppUrl(phoneE164: string, message: string): string {
-  // wa.me format expects digits only, no + or symbols
-  const digitsOnly = phoneE164.replace(/\D/g, '');
+export function getWhatsAppUrl(phoneInput: string, message: string): string {
+  if (!phoneInput || !phoneInput.trim()) {
+    return `https://wa.me/?text=${encodeURIComponent(message)}`;
+  }
+
+  // Normalize via E.164 first if possible
+  const normalized = normalizePhoneE164(phoneInput);
+  let digitsOnly = (normalized || phoneInput).replace(/\D/g, '');
+
+  if (!digitsOnly) {
+    return `https://wa.me/?text=${encodeURIComponent(message)}`;
+  }
+
+  // If 10 digits (standard Indian mobile entered without country code), prefix with India's 91
+  if (digitsOnly.length === 10) {
+    digitsOnly = '91' + digitsOnly;
+  } else if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+    // 09876543210 -> 919876543210
+    digitsOnly = '91' + digitsOnly.slice(1);
+  }
+
   return `https://wa.me/${digitsOnly}?text=${encodeURIComponent(message)}`;
 }
 
