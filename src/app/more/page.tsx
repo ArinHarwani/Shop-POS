@@ -62,6 +62,28 @@ export default function MorePage() {
                 Go to Bills
               </a>
             </div>
+
+            <div className="p-4 flex items-center justify-between bg-[#FFFBFB]">
+              <div>
+                <div className="font-semibold text-[#B91C1C] text-[17px]">Reset All Data (Start Fresh)</div>
+                <div className="text-[15px] text-[#6B6B6B]">Clear all local bills, test inventory & vouchers</div>
+              </div>
+              <Button
+                type="button"
+                variant="danger"
+                onClick={async () => {
+                  if (confirm('Are you sure you want to reset all data and start completely fresh? This cannot be undone.')) {
+                    await DataService.resetAllData();
+                    setExportNotice('All data wiped clean. Application is completely fresh.');
+                    setTimeout(() => {
+                      window.location.href = '/';
+                    }, 1000);
+                  }
+                }}
+              >
+                Reset Fresh
+              </Button>
+            </div>
           </div>
         </div>
       </div>

@@ -38,3 +38,4 @@ test.html
 test_edge.js
 capture.js
 cdp_capture.js
+.edge-profile-fresh/

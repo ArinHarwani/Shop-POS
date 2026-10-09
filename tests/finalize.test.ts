@@ -24,8 +24,16 @@ describe('Finalize Bill & Vouchers Integration Tests', () => {
   beforeEach(async () => {
     (global as any).localStorage.clear();
     setActiveRole('owner');
-    // Initialize products
-    await DataService.getProducts();
+    // Seed test product for automated test run
+    await DataService.addOrUpdateProduct({
+      item_number: '847291',
+      name: 'Floral Satin Crop Top',
+      category: 'Tops',
+      size: 'M',
+      color: 'Rose Pink',
+      price: 450,
+      quantity_on_hand: 12,
+    });
   });
 
   it('Finalizes bill successfully, decrements stock, issues vouchers and sequential TR-0001 invoice', async () => {

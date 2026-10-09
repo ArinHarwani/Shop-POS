@@ -2,52 +2,84 @@
 
 import React, { useState } from 'react';
 import { STRINGS, formatRupees } from '@/lib/strings';
-import { FIXTURE_VOUCHERS, FixtureVoucher } from '@/lib/fixtures';
+import { DataService } from '@/lib/data-service';
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
 import { useRouter } from 'next/navigation';
 import { formatIstDate, isVoucherExpired } from '@/lib/rewards';
 
+interface CheckedVoucherState {
+  code: string;
+  status: 'VALID' | 'USED' | 'EXPIRED' | 'CANCELLED' | 'NOT_FOUND';
+  face_value: number;
+  used_at?: string;
+  expires_at?: string;
+  min_purchase?: number;
+  customer_phone?: string;
+}
+
 export default function VouchersPage() {
   const router = useRouter();
   const [code, setCode] = useState('');
-  const [checkedVoucher, setCheckedVoucher] = useState<FixtureVoucher | null>(null);
+  const [checkedVoucher, setCheckedVoucher] = useState<CheckedVoucherState | null>(null);
   const [searched, setSearched] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [usedOnBillMessage, setUsedOnBillMessage] = useState<string | null>(null);
 
-  const handleCheck = (e?: React.FormEvent) => {
+  const handleCheck = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setUsedOnBillMessage(null);
     const clean = code.trim().toUpperCase();
     if (!clean) return;
 
+    setLoading(true);
     setSearched(true);
-    const match = FIXTURE_VOUCHERS[clean];
-    if (match) {
-      // Check expiry against current time
-      const expired = match.status === 'EXPIRED' || (match.expires_at ? isVoucherExpired(match.expires_at) : false);
-      setCheckedVoucher({
-        ...match,
-        status: expired ? 'EXPIRED' : match.status,
-      });
-    } else {
-      setCheckedVoucher({
-        code: clean,
-        status: 'NOT_FOUND',
-        face_value: 0,
-      });
+
+    try {
+      const result = await DataService.lookupVoucher(clean);
+      if (result && result.voucher) {
+        const v = result.voucher;
+        const expired = v.status === 'EXPIRED' || (v.expires_at ? isVoucherExpired(v.expires_at) : false);
+        const statusMap: Record<string, CheckedVoucherState['status']> = {
+          ISSUED: expired ? 'EXPIRED' : 'VALID',
+          REDEEMED: 'USED',
+          EXPIRED: 'EXPIRED',
+          CANCELLED: 'CANCELLED',
+        };
+
+        setCheckedVoucher({
+          code: v.code,
+          status: statusMap[v.status] || (expired ? 'EXPIRED' : 'VALID'),
+          face_value: v.face_value,
+          expires_at: v.expires_at || undefined,
+          min_purchase: v.min_purchase || undefined,
+          used_at: v.redeemed_at || undefined,
+          customer_phone: result.customer?.phone_e164,
+        });
+      } else {
+        setCheckedVoucher({
+          code: clean,
+          status: 'NOT_FOUND',
+          face_value: 0,
+        });
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleUseOnBill = () => {
     if (!checkedVoucher || checkedVoucher.status !== 'VALID') return;
     try {
-      localStorage.setItem('attached_voucher', JSON.stringify({
-        code: checkedVoucher.code,
-        face_value: checkedVoucher.face_value,
-        expires_at: checkedVoucher.expires_at,
-        min_purchase: checkedVoucher.min_purchase || 3000,
-      }));
+      localStorage.setItem(
+        'attached_voucher',
+        JSON.stringify({
+          code: checkedVoucher.code,
+          face_value: checkedVoucher.face_value,
+          expires_at: checkedVoucher.expires_at,
+          min_purchase: checkedVoucher.min_purchase || 3000,
+        })
+      );
     } catch {
       // ignore localStorage quota errors
     }
@@ -75,38 +107,10 @@ export default function VouchersPage() {
                 autoFocus
               />
             </div>
-            <Button type="submit" variant="primary">
-              {STRINGS.checkVoucherBtn}
+            <Button type="submit" variant="primary" disabled={loading || !code.trim()}>
+              {loading ? 'Checking...' : STRINGS.checkVoucherBtn}
             </Button>
           </form>
-
-          {/* Sample test codes for preview */}
-          <div className="text-[14px] text-[#6B6B6B] bg-[#F6F6F4] p-3 rounded-[8px] border border-[#E6E6E6] flex flex-col gap-1">
-            <span className="font-semibold text-[#1A1A1A]">Sample preview codes:</span>
-            <div className="flex flex-wrap gap-2 pt-0.5">
-              <button
-                type="button"
-                onClick={() => { setCode('TRD-K7M2-9QXA'); }}
-                className="font-mono text-[#15803D] hover:underline"
-              >
-                TRD-K7M2-9QXA (Rs 250 Valid)
-              </button>
-              <button
-                type="button"
-                onClick={() => { setCode('TRD-H4P8-2WZC'); }}
-                className="font-mono text-[#B45309] hover:underline"
-              >
-                TRD-H4P8-2WZC (Used)
-              </button>
-              <button
-                type="button"
-                onClick={() => { setCode('TRD-EXPD-9999'); }}
-                className="font-mono text-[#B91C1C] hover:underline"
-              >
-                TRD-EXPD-9999 (Expired)
-              </button>
-            </div>
-          </div>
 
           {usedOnBillMessage && (
             <div className="p-3 bg-[#DCFCE7] text-[#15803D] rounded-[8px] border border-[#86EFAC] text-[15px] font-semibold">
@@ -136,6 +140,11 @@ export default function VouchersPage() {
                     EXPIRED
                   </span>
                 )}
+                {checkedVoucher.status === 'CANCELLED' && (
+                  <span className="text-[13px] font-bold px-2 py-0.5 rounded bg-[#FEE2E2] text-[#B91C1C]">
+                    CANCELLED
+                  </span>
+                )}
                 {checkedVoucher.status === 'NOT_FOUND' && (
                   <span className="text-[13px] font-bold px-2 py-0.5 rounded bg-[#FEE2E2] text-[#B91C1C]">
                     NOT FOUND
@@ -150,10 +159,12 @@ export default function VouchersPage() {
                     {formatRupees(checkedVoucher.face_value)} off
                   </div>
                   <div className="text-[14px] text-[#1A1A1A] flex flex-col gap-1">
-                    <div>
-                      <span className="font-medium text-[#6B6B6B]">Valid till: </span>
-                      <span className="font-semibold">{formatIstDate(checkedVoucher.expires_at || '2026-11-11T18:29:59.999Z')}</span>
-                    </div>
+                    {checkedVoucher.expires_at && (
+                      <div>
+                        <span className="font-medium text-[#6B6B6B]">Valid till: </span>
+                        <span className="font-semibold">{formatIstDate(checkedVoucher.expires_at)}</span>
+                      </div>
+                    )}
                     <div>
                       <span className="font-medium text-[#6B6B6B]">Minimum bill: </span>
                       <span className="font-semibold">Rs 3,000 in-store purchase</span>
@@ -172,7 +183,7 @@ export default function VouchersPage() {
               {checkedVoucher.status === 'USED' && (
                 <div className="flex flex-col gap-1 text-[#B45309]">
                   <div className="font-bold text-[17px]">
-                    This voucher was already used on {formatIstDate(checkedVoucher.used_at) || '09 Oct 2026'}.
+                    This voucher was already used {checkedVoucher.used_at ? `on ${formatIstDate(checkedVoucher.used_at)}` : ''}.
                   </div>
                   <div className="text-[13px] text-[#6B6B6B]">
                     Each voucher can be redeemed once only.
@@ -184,10 +195,19 @@ export default function VouchersPage() {
               {checkedVoucher.status === 'EXPIRED' && (
                 <div className="flex flex-col gap-1 text-[#B91C1C]">
                   <div className="font-bold text-[17px]">
-                    This voucher expired on {formatIstDate(checkedVoucher.expires_at) || 'earlier'}.
+                    This voucher expired {checkedVoucher.expires_at ? `on ${formatIstDate(checkedVoucher.expires_at)}` : ''}.
                   </div>
                   <div className="text-[13px] text-[#6B6B6B]">
                     Expired vouchers cannot be redeemed.
+                  </div>
+                </div>
+              )}
+
+              {/* Red: Cancelled */}
+              {checkedVoucher.status === 'CANCELLED' && (
+                <div className="flex flex-col gap-1 text-[#B91C1C]">
+                  <div className="font-bold text-[17px]">
+                    This voucher was cancelled with its source bill.
                   </div>
                 </div>
               )}
@@ -205,4 +225,3 @@ export default function VouchersPage() {
     </div>
   );
 }
-

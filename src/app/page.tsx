@@ -2,7 +2,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { STRINGS, formatRupees } from '@/lib/strings';
-import { FIXTURE_PRODUCTS, FixtureProduct, FixtureBillItem } from '@/lib/fixtures';
+import { Product } from '@/types';
+import { DataService } from '@/lib/data-service';
 import {
   DEFAULT_OFFER_TIERS,
   calculateEligibleAmount,
@@ -27,7 +28,8 @@ export default function SellPage() {
   const [step, setStep] = useState<'cart' | 'payment' | 'done'>('cart');
 
   // Cart state
-  const [cart, setCart] = useState<FixtureBillItem[]>([]);
+  const [cart, setCart] = useState<{ product: Product; quantity: number }[]>([]);
+  const [soldItems, setSoldItems] = useState<{ product: Product; quantity: number }[]>([]);
   const [itemInput, setItemInput] = useState('');
   const [itemError, setItemError] = useState<string | null>(null);
 
@@ -84,6 +86,7 @@ export default function SellPage() {
             color: item.product.color,
             price: item.product.price,
             quantity_on_hand: item.product.quantity_on_hand,
+            is_active: item.product.is_active ?? true,
           },
           quantity: item.quantity,
         }))
@@ -139,15 +142,15 @@ export default function SellPage() {
   const rewardEval = evaluateRewards(eligibleAmount, DEFAULT_OFFER_TIERS);
 
   // Add Item to Bill
-  const handleAddItem = (e?: React.FormEvent) => {
+  const handleAddItem = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setItemError(null);
     const query = itemInput.trim().toLowerCase();
     if (!query) return;
 
-    const found = FIXTURE_PRODUCTS.find((p) => p.item_number.toLowerCase() === query);
+    const found = await DataService.getProductByItemNumber(query);
     if (!found) {
-      setItemError(STRINGS.itemNotFoundError);
+      setItemError(`Garment #${itemInput.trim()} not found in inventory.`);
       return;
     }
 
@@ -231,48 +234,62 @@ export default function SellPage() {
   };
 
   // Execute Sale Completion
-  const handleCompleteSale = () => {
+  const handleCompleteSale = async () => {
     setShowConfirm(false);
+    const cleanPhone = phone.startsWith('+91') ? phone : (phone.length === 10 ? `+91${phone}` : phone);
 
-    // Build completed sale summary
-    const newBillNumber = `TR-${String(Math.floor(1000 + Math.random() * 9000))}`;
-    const generatedVouchers: { code: string; face_value: number; expires_at: string }[] = [];
-    if (rewardEval.voucherCount > 0) {
-      const expIso = calculateVoucherExpiry(new Date(), 30).toISOString();
-      for (let i = 0; i < rewardEval.voucherCount; i++) {
-        generatedVouchers.push({
-          code: generateClientVoucherCode(),
-          face_value: rewardEval.voucherValue,
-          expires_at: expIso,
-        });
+    try {
+      const result = await DataService.finalizeBill({
+        client_request_id: `req-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        customer_phone: cleanPhone,
+        customer_name: customerName.trim() || undefined,
+        instagram_handle: instagramId.trim() || undefined,
+        marketing_consent: marketingConsent,
+        payment_mode: paymentMode,
+        discount_amount: manualDiscount,
+        applied_voucher_code: attachedVoucher?.code,
+        gift_handed_over: giftHandedOver,
+        items: cart.map((item) => ({
+          product_id: item.product.id,
+          quantity: item.quantity,
+        })),
+      });
+
+      setSoldItems([...cart]);
+      setCompletedSale({
+        billNumber: result.invoice_number,
+        total: result.grand_total,
+        subtotal: result.subtotal,
+        discountAmount: result.discount_total,
+        voucherDeduction: result.voucher_total,
+        paymentMode,
+        vouchers: result.vouchers.map((v) => ({
+          code: v.code,
+          face_value: v.face_value,
+          expires_at: calculateVoucherExpiry(new Date(), 30).toISOString(),
+        })),
+        gift: result.gift ? result.gift.description : null,
+        giftClaimed: result.gift ? result.gift.claimed : false,
+      });
+
+      if (attachedVoucher) {
+        try {
+          localStorage.removeItem('attached_voucher');
+        } catch {}
+        setAttachedVoucher(null);
       }
+
+      clearSavedCart();
+      setCart([]);
+      setStep('done');
+    } catch (err: any) {
+      alert(`Could not complete sale: ${err.message || 'Unknown error'}`);
     }
-
-    setCompletedSale({
-      billNumber: newBillNumber,
-      total: payableTotal,
-      subtotal,
-      discountAmount: manualDiscount,
-      voucherDeduction: voucherDiscount,
-      paymentMode,
-      vouchers: generatedVouchers,
-      gift: rewardEval.giftCount > 0 ? (rewardEval.giftDescription || 'Small gift') : null,
-      giftClaimed: giftHandedOver,
-    });
-
-    if (attachedVoucher) {
-      try {
-        localStorage.removeItem('attached_voucher');
-      } catch {}
-      setAttachedVoucher(null);
-    }
-
-    clearSavedCart();
-    setStep('done');
   };
 
   const handleStartNewSale = () => {
     setCart([]);
+    setSoldItems([]);
     setPhone('');
     setCustomerName('');
     setInstagramId('');
@@ -639,7 +656,7 @@ export default function SellPage() {
                         status: 'FINALIZED',
                         finalized_at: new Date().toISOString(),
                       },
-                      items: cart.map((c) => ({
+                      items: soldItems.map((c) => ({
                         product_id: c.product.id,
                         item_number_snapshot: c.product.item_number,
                         description_snapshot: c.product.name,
@@ -686,7 +703,7 @@ export default function SellPage() {
                         status: 'FINALIZED',
                         finalized_at: new Date().toISOString(),
                       },
-                      items: cart.map((c) => ({
+                      items: soldItems.map((c) => ({
                         product_id: c.product.id,
                         item_number_snapshot: c.product.item_number,
                         description_snapshot: c.product.name,
@@ -747,7 +764,7 @@ export default function SellPage() {
                         status: 'FINALIZED',
                         finalized_at: new Date().toISOString(),
                       },
-                      items: cart.map((c) => ({
+                      items: soldItems.map((c) => ({
                         product_id: c.product.id,
                         item_number_snapshot: c.product.item_number,
                         description_snapshot: c.product.name,

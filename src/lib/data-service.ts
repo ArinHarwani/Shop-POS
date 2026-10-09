@@ -38,18 +38,8 @@ const STORAGE_KEYS = {
   INVOICE_SEQ: 'trendy_db_invoice_seq',
 };
 
-// Initial starter collection for FEVER Trendy Collection
-const INITIAL_PRODUCTS: Product[] = [
-  { id: 'p-1', item_number: '847291', name: 'Floral Satin Crop Top', category: 'Tops', size: 'M', color: 'Rose Pink', price: 450, quantity_on_hand: 12, is_active: true },
-  { id: 'p-2', item_number: '847305', name: 'Embroidered Velvet Bustier', category: 'Tops', size: 'S', color: 'Burgundy', price: 400, quantity_on_hand: 8, is_active: true },
-  { id: 'p-3', item_number: '912004', name: 'High-Rise Flared Denim', category: 'Jeans', size: '28', color: 'Indigo', price: 500, quantity_on_hand: 15, is_active: true },
-  { id: 'p-4', item_number: '004812', name: 'Boho Chiffon Maxi Dress', category: 'Dresses', size: 'L', color: 'Ivory Cream', price: 1200, quantity_on_hand: 5, is_active: true },
-  { id: 'p-5', item_number: '772109', name: 'Ruched Metallic Midi Skirt', category: 'Skirts', size: 'M', color: 'Silver Chrome', price: 650, quantity_on_hand: 7, is_active: true },
-  { id: 'p-6', item_number: '550192', name: 'Ribbed Halter Knit Top', category: 'Tops', size: 'Free Size', color: 'Black Onyx', price: 350, quantity_on_hand: 20, is_active: true },
-  { id: 'p-7', item_number: '661840', name: 'Structured Oversized Blazer', category: 'Outerwear', size: 'XL', color: 'Camel', price: 1500, quantity_on_hand: 4, is_active: true },
-  { id: 'p-8', item_number: '339120', name: 'Pleated Satin Evening Trousers', category: 'Pants', size: '30', color: 'Emerald Green', price: 800, quantity_on_hand: 6, is_active: true },
-  { id: 'p-9', item_number: '118234', name: 'Chunky Pearl Statement Choker', category: 'Accessories', size: 'One Size', color: 'Pearl White', price: 250, quantity_on_hand: 18, is_active: true },
-];
+// Initial starter collection starts empty for fresh stall operation
+const INITIAL_PRODUCTS: Product[] = [];
 
 function getLocalData<T>(key: string, defaultValue: T): T {
   if (typeof window === 'undefined') return defaultValue;
@@ -84,8 +74,9 @@ export class DataService {
     }
 
     let local = getLocalData<Product[]>(STORAGE_KEYS.PRODUCTS, []);
-    if (local.length === 0) {
-      local = INITIAL_PRODUCTS;
+    // Purge legacy dev fixture items if present
+    if (local.some((p) => p.id?.startsWith('p-') || p.id?.startsWith('fx-'))) {
+      local = local.filter((p) => !p.id?.startsWith('p-') && !p.id?.startsWith('fx-'));
       setLocalData(STORAGE_KEYS.PRODUCTS, local);
     }
     return local;
@@ -868,4 +859,24 @@ export class DataService {
       stockMovements: getLocalData<StockMovement[]>(STORAGE_KEYS.STOCK_MOVEMENTS, []),
     };
   }
+
+  // ----------------------------------------------------
+  // RESET ALL DATA TO FRESH STATE
+  // ----------------------------------------------------
+  static async resetAllData(): Promise<void> {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEYS.PRODUCTS);
+      localStorage.removeItem(STORAGE_KEYS.INVOICES);
+      localStorage.removeItem(STORAGE_KEYS.INVOICE_ITEMS);
+      localStorage.removeItem(STORAGE_KEYS.CUSTOMERS);
+      localStorage.removeItem(STORAGE_KEYS.VOUCHERS);
+      localStorage.removeItem(STORAGE_KEYS.GIFTS);
+      localStorage.removeItem(STORAGE_KEYS.STOCK_MOVEMENTS);
+      localStorage.removeItem(STORAGE_KEYS.MESSAGE_LOGS);
+      localStorage.removeItem('attached_voucher');
+      localStorage.removeItem('trendy_saved_cart');
+      localStorage.removeItem('trendy_cart_items');
+    }
+  }
 }
+
