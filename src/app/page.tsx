@@ -18,7 +18,7 @@ import { TextField, NumberField } from '@/components/ui/TextField';
 import { ItemRow } from '@/components/ui/ItemRow';
 import { TotalBar } from '@/components/ui/TotalBar';
 import { ConfirmSheet } from '@/components/ui/ConfirmSheet';
-import { buildWhatsAppMessage, getWhatsAppUrl, getSmsUrl } from '@/lib/whatsapp';
+import { buildWhatsAppMessage, getWhatsAppUrl, getSmsUrl, normalizePhoneE164 } from '@/lib/whatsapp';
 import { downloadInvoicePdf } from '@/lib/pdf';
 import { downloadVoucherPng } from '@/lib/voucher-canvas';
 import { getSavedCart, saveCart, clearSavedCart } from '@/lib/storage';
@@ -159,6 +159,13 @@ export default function SellPage() {
       return;
     }
 
+    const existing = cart.find((item) => item.product.id === found.id);
+    const inCartQty = existing ? existing.quantity : 0;
+    if (inCartQty + 1 > found.quantity_on_hand) {
+      setItemError(`Only ${found.quantity_on_hand} in stock for #${found.item_number} (${inCartQty} already in bill).`);
+      return;
+    }
+
     setCart((prev) => {
       const idx = prev.findIndex((item) => item.product.id === found.id);
       if (idx >= 0) {
@@ -174,16 +181,25 @@ export default function SellPage() {
   };
 
   const handleUpdateQty = (productId: string, delta: number) => {
+    setItemError(null);
+    const item = cart.find((c) => c.product.id === productId);
+    if (!item) return;
+
+    if (delta > 0 && item.quantity >= item.product.quantity_on_hand) {
+      setItemError(`Only ${item.product.quantity_on_hand} in stock for #${item.product.item_number}.`);
+      return;
+    }
+
     setCart((prev) =>
       prev
-        .map((item) => {
-          if (item.product.id === productId) {
-            const nextQty = item.quantity + delta;
-            return { ...item, quantity: nextQty };
+        .map((it) => {
+          if (it.product.id === productId) {
+            const nextQty = it.quantity + delta;
+            return { ...it, quantity: nextQty };
           }
-          return item;
+          return it;
         })
-        .filter((item) => item.quantity > 0)
+        .filter((it) => it.quantity > 0)
     );
   };
 
@@ -225,8 +241,8 @@ export default function SellPage() {
       return;
     }
     setPhoneError(null);
-    const cleanPhone = phone.replace(/\D/g, '');
-    if (cleanPhone.length < 10) {
+    const normalized = normalizePhoneE164(phone);
+    if (!normalized) {
       setPhoneError(STRINGS.phoneErrorReq);
       return;
     }
@@ -236,7 +252,7 @@ export default function SellPage() {
   // Execute Sale Completion
   const handleCompleteSale = async () => {
     setShowConfirm(false);
-    const cleanPhone = phone.startsWith('+91') ? phone : (phone.length === 10 ? `+91${phone}` : phone);
+    const cleanPhone = normalizePhoneE164(phone) || (phone.startsWith('+91') ? phone : `+91${phone.replace(/\D/g, '')}`);
 
     try {
       const result = await DataService.finalizeBill({
@@ -648,9 +664,9 @@ export default function SellPage() {
                         invoice_number: completedSale.billNumber,
                         client_request_id: '',
                         customer_id: '',
-                        subtotal: completedSale.total,
-                        discount_total: 0,
-                        voucher_total: 0,
+                        subtotal: completedSale.subtotal,
+                        discount_total: completedSale.discountAmount,
+                        voucher_total: completedSale.voucherDeduction,
                         grand_total: completedSale.total,
                         payment_mode: completedSale.paymentMode as any,
                         status: 'FINALIZED',
@@ -695,9 +711,9 @@ export default function SellPage() {
                         invoice_number: completedSale.billNumber,
                         client_request_id: '',
                         customer_id: '',
-                        subtotal: completedSale.total,
-                        discount_total: 0,
-                        voucher_total: 0,
+                        subtotal: completedSale.subtotal,
+                        discount_total: completedSale.discountAmount,
+                        voucher_total: completedSale.voucherDeduction,
                         grand_total: completedSale.total,
                         payment_mode: completedSale.paymentMode as any,
                         status: 'FINALIZED',
@@ -756,9 +772,9 @@ export default function SellPage() {
                         invoice_number: completedSale.billNumber,
                         client_request_id: '',
                         customer_id: '',
-                        subtotal: completedSale.total,
-                        discount_total: 0,
-                        voucher_total: 0,
+                        subtotal: completedSale.subtotal,
+                        discount_total: completedSale.discountAmount,
+                        voucher_total: completedSale.voucherDeduction,
                         grand_total: completedSale.total,
                         payment_mode: completedSale.paymentMode as any,
                         status: 'FINALIZED',

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { buildWhatsAppMessage, getWhatsAppUrl, getSmsUrl } from '@/lib/whatsapp';
 import { downloadInvoicePdf } from '@/lib/pdf';
 import { formatIstDate } from '@/lib/rewards';
+import { getActiveRole } from '@/lib/storage';
 
 export default function TodayPage() {
   const [stats, setStats] = useState({
@@ -243,6 +244,31 @@ export default function TodayPage() {
                   >
                     {STRINGS.sendSmsBtn}
                   </a>
+                )}
+
+                {/* Owner Void / Cancel Bill Action */}
+                {getActiveRole() === 'owner' && selectedBill.status !== 'CANCELLED' && (
+                  <div className="pt-2 border-t border-[#E6E6E6]">
+                    <Button
+                      variant="danger"
+                      fullWidth
+                      onClick={async () => {
+                        const reason = window.prompt('Please enter the reason for voiding/cancelling this bill:');
+                        if (!reason || !reason.trim()) return;
+                        try {
+                          await DataService.cancelInvoice(selectedBill.id, reason.trim(), true);
+                          alert('Bill cancelled. Inventory stock restored and associated vouchers voided.');
+                          await loadTodayData();
+                          setSelectedBill(null);
+                          setSelectedDetails(null);
+                        } catch (err: any) {
+                          alert(`Error cancelling bill: ${err.message || 'Unknown error'}`);
+                        }
+                      }}
+                    >
+                      Void / Cancel Bill (Owner)
+                    </Button>
+                  </div>
                 )}
               </div>
             </div>

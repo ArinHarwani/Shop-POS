@@ -171,7 +171,11 @@ export function generateInvoicePdf(options: GenerateInvoicePdfOptions): jsPDF {
   doc.text('Thank you for shopping with FEVER!', pageWidth / 2, y + 6, { align: 'center' });
   doc.text('Check out more from our exclusive collection:', pageWidth / 2, y + 10, { align: 'center' });
   doc.setTextColor(31, 58, 95); // Muted accent
-  doc.text('https://www.instagram.com/fever.profilefashion', pageWidth / 2, y + 14, { align: 'center' });
+  const igText = 'https://www.instagram.com/fever.profilefashion';
+  const igUrl = 'https://www.instagram.com/fever.profilefashion?utm_source=ig_web_button_share_sheet&xtok=ZDNlZDc0MzIxNw==';
+  doc.text(igText, pageWidth / 2, y + 14, { align: 'center' });
+  const igWidth = doc.getTextWidth(igText);
+  doc.link(pageWidth / 2 - igWidth / 2, y + 11, igWidth, 4, { url: igUrl });
   doc.setTextColor(148, 163, 184);
   doc.text('For returns or exchanges, please produce this bill within 7 days at our store.', pageWidth / 2, y + 19, { align: 'center' });
 

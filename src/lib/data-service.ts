@@ -38,8 +38,17 @@ const STORAGE_KEYS = {
   INVOICE_SEQ: 'trendy_db_invoice_seq',
 };
 
-// Initial starter collection starts empty for fresh stall operation
-const INITIAL_PRODUCTS: Product[] = [];
+// Compliant UUID generator for PostgreSQL UUID columns and local state
+function generateUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 function getLocalData<T>(key: string, defaultValue: T): T {
   if (typeof window === 'undefined') return defaultValue;
@@ -66,11 +75,15 @@ export class DataService {
   // ----------------------------------------------------
   static async getProducts(): Promise<Product[]> {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .order('item_number', { ascending: true });
-      if (!error && data && data.length > 0) return data;
+      try {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .order('item_number', { ascending: true });
+        if (!error && data && data.length > 0) return data;
+      } catch (err) {
+        console.warn('Supabase getProducts failed, using local fallback:', err);
+      }
     }
 
     let local = getLocalData<Product[]>(STORAGE_KEYS.PRODUCTS, []);
@@ -119,7 +132,7 @@ export class DataService {
       products[existingIndex] = savedProduct;
     } else {
       savedProduct = {
-        id: 'prod_' + Math.random().toString(36).substring(2, 9),
+        id: generateUuid(),
         item_number: product.item_number.trim(),
         name: product.name.trim(),
         category: product.category || 'General',
@@ -139,7 +152,7 @@ export class DataService {
     // Audit trail stock movement
     const movements = getLocalData<StockMovement[]>(STORAGE_KEYS.STOCK_MOVEMENTS, []);
     movements.push({
-      id: 'sm_' + Math.random().toString(36).substring(2, 9),
+      id: generateUuid(),
       product_id: savedProduct.id,
       delta: savedProduct.quantity_on_hand,
       reason: 'ADD',
@@ -149,7 +162,11 @@ export class DataService {
     setLocalData(STORAGE_KEYS.STOCK_MOVEMENTS, movements);
 
     if (isSupabaseConfigured && supabase) {
-      await supabase.from('products').upsert(savedProduct, { onConflict: 'item_number' });
+      try {
+        await supabase.from('products').upsert(savedProduct, { onConflict: 'item_number' });
+      } catch (err) {
+        console.warn('Supabase upsert failed, stored locally:', err);
+      }
     }
 
     return savedProduct;
@@ -173,7 +190,7 @@ export class DataService {
       } else {
         const item: Product = {
           ...p,
-          id: p.id || 'prod_' + Math.random().toString(36).substring(2, 9),
+          id: p.id || generateUuid(),
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
@@ -185,7 +202,11 @@ export class DataService {
     setLocalData(STORAGE_KEYS.PRODUCTS, products);
 
     if (isSupabaseConfigured && supabase) {
-      await supabase.from('products').upsert(products, { onConflict: 'item_number' });
+      try {
+        await supabase.from('products').upsert(products, { onConflict: 'item_number' });
+      } catch (err) {
+        console.warn('Supabase bulk upsert failed, stored locally:', err);
+      }
     }
 
     return { added, updated };
@@ -212,7 +233,7 @@ export class DataService {
 
     const movements = getLocalData<StockMovement[]>(STORAGE_KEYS.STOCK_MOVEMENTS, []);
     movements.push({
-      id: 'sm_' + Math.random().toString(36).substring(2, 9),
+      id: generateUuid(),
       product_id: productId,
       delta,
       reason: 'ADJUST',
@@ -222,12 +243,16 @@ export class DataService {
     setLocalData(STORAGE_KEYS.STOCK_MOVEMENTS, movements);
 
     if (isSupabaseConfigured && supabase) {
-      await supabase.rpc('adjust_stock', {
-        p_product_id: productId,
-        p_delta: delta,
-        p_reason: reason,
-        p_note: note,
-      });
+      try {
+        await supabase.rpc('adjust_stock', {
+          p_product_id: productId,
+          p_delta: delta,
+          p_reason: reason,
+          p_note: note,
+        });
+      } catch (err) {
+        console.warn('Supabase adjust_stock RPC failed, recorded locally:', err);
+      }
     }
 
     return prod;
@@ -238,8 +263,12 @@ export class DataService {
   // ----------------------------------------------------
   static async getOfferTiers(): Promise<OfferTier[]> {
     if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase.from('offer_tiers').select('*').order('threshold', { ascending: true });
-      if (data && data.length > 0) return data;
+      try {
+        const { data, error } = await supabase.from('offer_tiers').select('*').order('threshold', { ascending: true });
+        if (!error && data && data.length > 0) return data;
+      } catch (err) {
+        console.warn('Supabase getOfferTiers failed, using local/defaults:', err);
+      }
     }
     let local = getLocalData<OfferTier[]>(STORAGE_KEYS.OFFER_TIERS, []);
     if (local.length === 0) {
@@ -265,7 +294,11 @@ export class DataService {
     setLocalData(STORAGE_KEYS.OFFER_TIERS, tiers);
 
     if (isSupabaseConfigured && supabase) {
-      await supabase.from('offer_tiers').upsert(tier);
+      try {
+        await supabase.from('offer_tiers').upsert(tier);
+      } catch (err) {
+        console.warn('Supabase saveOfferTier failed, saved locally:', err);
+      }
     }
     return tier;
   }
@@ -327,7 +360,7 @@ export class DataService {
     let seq = getLocalData<number>(STORAGE_KEYS.INVOICE_SEQ, 0) + 1;
     setLocalData(STORAGE_KEYS.INVOICE_SEQ, seq);
     const invoiceNumber = `TR-${String(seq).padStart(4, '0')}`;
-    const invoiceId = 'inv_' + Math.random().toString(36).substring(2, 9);
+    const invoiceId = generateUuid();
 
     for (const item of payload.items) {
       const prod = products.find((p) => p.id === item.product_id)!;
@@ -338,7 +371,7 @@ export class DataService {
       subtotal += lineTotal;
 
       invoiceItems.push({
-        id: 'li_' + Math.random().toString(36).substring(2, 9),
+        id: generateUuid(),
         invoice_id: invoiceId,
         product_id: prod.id,
         item_number_snapshot: prod.item_number,
@@ -349,7 +382,7 @@ export class DataService {
       });
 
       stockMovements.push({
-        id: 'sm_' + Math.random().toString(36).substring(2, 9),
+        id: generateUuid(),
         product_id: prod.id,
         delta: -item.quantity,
         reason: 'SALE',
@@ -391,7 +424,7 @@ export class DataService {
     let customer = customers.find((c) => c.phone_e164 === payload.customer_phone);
     if (!customer) {
       customer = {
-        id: 'cust_' + Math.random().toString(36).substring(2, 9),
+        id: generateUuid(),
         phone_e164: payload.customer_phone,
         name: payload.customer_name || null,
         instagram_handle: payload.instagram_handle?.replace(/^@/, '') || null,
@@ -432,7 +465,7 @@ export class DataService {
         } while (allVouchers.some((v) => v.code === code));
 
         const newVoucher: Voucher = {
-          id: 'vouch_' + Math.random().toString(36).substring(2, 9),
+          id: generateUuid(),
           code,
           source_invoice_id: invoiceId,
           customer_id: customer.id,
@@ -452,7 +485,7 @@ export class DataService {
     if (rewardEval.giftCount > 0) {
       const gifts = getLocalData<Gift[]>(STORAGE_KEYS.GIFTS, []);
       createdGift = {
-        id: 'gift_' + Math.random().toString(36).substring(2, 9),
+        id: generateUuid(),
         source_invoice_id: invoiceId,
         customer_id: customer.id,
         description: rewardEval.giftDescription || 'Small gift',
@@ -464,7 +497,7 @@ export class DataService {
       setLocalData(STORAGE_KEYS.GIFTS, gifts);
     }
 
-    // 10. Save Invoice and Items
+    // 10. Save Invoice and Items locally
     const invoice: Invoice = {
       id: invoiceId,
       invoice_number: invoiceNumber,
@@ -487,6 +520,13 @@ export class DataService {
     const allInvoiceItems = getLocalData<InvoiceItem[]>(STORAGE_KEYS.INVOICE_ITEMS, []);
     allInvoiceItems.push(...invoiceItems);
     setLocalData(STORAGE_KEYS.INVOICE_ITEMS, allInvoiceItems);
+
+    // Background asynchronous sync to Supabase when online
+    if (isSupabaseConfigured && supabase) {
+      this.syncBillToSupabase(customer, invoice, invoiceItems, createdVouchers, createdGift).catch((err) => {
+        console.warn('Background Supabase bill sync warning:', err);
+      });
+    }
 
     return {
       success: true,
@@ -513,6 +553,89 @@ export class DataService {
           }
         : null,
     };
+  }
+
+  // Background Cloud Sync Helper (Tolerates offline/slow connections)
+  private static async syncBillToSupabase(
+    customer: Customer,
+    invoice: Invoice,
+    items: InvoiceItem[],
+    vouchers: Voucher[],
+    gift: Gift | null
+  ): Promise<void> {
+    if (!supabase) return;
+    try {
+      await supabase.from('customers').upsert({
+        id: customer.id,
+        phone_e164: customer.phone_e164,
+        name: customer.name,
+        instagram_handle: customer.instagram_handle,
+        marketing_consent: customer.marketing_consent,
+        consent_at: customer.consent_at,
+        created_at: customer.created_at,
+        updated_at: customer.updated_at || new Date().toISOString(),
+      });
+
+      await supabase.from('invoices').insert({
+        id: invoice.id,
+        invoice_number: invoice.invoice_number,
+        client_request_id: invoice.client_request_id,
+        customer_id: customer.id,
+        subtotal: invoice.subtotal,
+        discount_total: invoice.discount_total,
+        voucher_total: invoice.voucher_total,
+        grand_total: invoice.grand_total,
+        payment_mode: invoice.payment_mode,
+        status: invoice.status,
+        finalized_at: invoice.finalized_at,
+        offer_tier_id: invoice.offer_tier_id,
+      });
+
+      if (items.length > 0) {
+        await supabase.from('invoice_items').insert(
+          items.map((it) => ({
+            id: it.id,
+            invoice_id: it.invoice_id,
+            product_id: it.product_id,
+            item_number_snapshot: it.item_number_snapshot,
+            description_snapshot: it.description_snapshot,
+            quantity: it.quantity,
+            unit_price_snapshot: it.unit_price_snapshot,
+            line_total: it.line_total,
+          }))
+        );
+      }
+
+      if (vouchers.length > 0) {
+        await supabase.from('vouchers').insert(
+          vouchers.map((v) => ({
+            id: v.id,
+            code: v.code,
+            source_invoice_id: v.source_invoice_id,
+            customer_id: v.customer_id,
+            face_value: v.face_value,
+            min_purchase: v.min_purchase,
+            status: v.status,
+            expires_at: v.expires_at,
+            created_at: v.created_at,
+          }))
+        );
+      }
+
+      if (gift) {
+        await supabase.from('gifts').insert({
+          id: gift.id,
+          source_invoice_id: gift.source_invoice_id,
+          customer_id: gift.customer_id,
+          description: gift.description,
+          status: gift.status,
+          collected_at: gift.collected_at,
+          created_at: gift.created_at,
+        });
+      }
+    } catch (err) {
+      console.warn('Supabase sync bill failed:', err);
+    }
   }
 
   // ----------------------------------------------------
@@ -550,7 +673,7 @@ export class DataService {
         prod.quantity_on_hand += line.quantity;
         prod.updated_at = new Date().toISOString();
         stockMovements.push({
-          id: 'sm_' + Math.random().toString(36).substring(2, 9),
+          id: generateUuid(),
           product_id: prod.id,
           delta: line.quantity,
           reason: 'CANCEL',
@@ -587,11 +710,15 @@ export class DataService {
     setLocalData(STORAGE_KEYS.INVOICES, invoices);
 
     if (isSupabaseConfigured && supabase) {
-      await supabase.rpc('cancel_invoice', {
-        p_invoice_id: invoiceId,
-        p_reason: reason,
-        p_override_redeemed: overrideRedeemed,
-      });
+      try {
+        await supabase.rpc('cancel_invoice', {
+          p_invoice_id: invoiceId,
+          p_reason: reason,
+          p_override_redeemed: overrideRedeemed,
+        });
+      } catch (err) {
+        console.warn('Supabase cancel_invoice RPC failed, recorded locally:', err);
+      }
     }
   }
 
@@ -601,14 +728,30 @@ export class DataService {
   static async lookupVoucher(code: string): Promise<{ voucher: Voucher; invoice?: Invoice; customer?: Customer } | null> {
     const cleanCode = code.trim().toUpperCase();
     const vouchers = getLocalData<Voucher[]>(STORAGE_KEYS.VOUCHERS, []);
-    const voucher = vouchers.find((v) => v.code === cleanCode);
+    let voucher = vouchers.find((v) => v.code === cleanCode);
+
+    if (!voucher && isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('vouchers')
+          .select('*')
+          .eq('code', cleanCode)
+          .maybeSingle();
+        if (!error && data) {
+          voucher = data as Voucher;
+        }
+      } catch (err) {
+        console.warn('Supabase lookupVoucher failed, checking local only:', err);
+      }
+    }
+
     if (!voucher) return null;
 
     const invoices = getLocalData<Invoice[]>(STORAGE_KEYS.INVOICES, []);
-    const invoice = invoices.find((i) => i.id === voucher.source_invoice_id);
+    const invoice = invoices.find((i) => i.id === voucher?.source_invoice_id);
 
     const customers = getLocalData<Customer[]>(STORAGE_KEYS.CUSTOMERS, []);
-    const customer = customers.find((c) => c.id === voucher.customer_id);
+    const customer = customers.find((c) => c.id === voucher?.customer_id);
 
     return { voucher, invoice, customer };
   }
@@ -635,10 +778,14 @@ export class DataService {
     setLocalData(STORAGE_KEYS.VOUCHERS, vouchers);
 
     if (isSupabaseConfigured && supabase) {
-      await supabase.rpc('redeem_voucher', {
-        p_code: cleanCode,
-        p_invoice_id: invoiceId || null,
-      });
+      try {
+        await supabase.rpc('redeem_voucher', {
+          p_code: cleanCode,
+          p_invoice_id: invoiceId || null,
+        });
+      } catch (err) {
+        console.warn('Supabase redeem_voucher RPC failed, redeemed locally:', err);
+      }
     }
 
     return voucher;
@@ -661,10 +808,14 @@ export class DataService {
     setLocalData(STORAGE_KEYS.GIFTS, gifts);
 
     if (isSupabaseConfigured && supabase) {
-      await supabase.from('gifts').update({
-        status: 'COLLECTED',
-        collected_at: new Date().toISOString(),
-      }).eq('id', giftId);
+      try {
+        await supabase.from('gifts').update({
+          status: 'COLLECTED',
+          collected_at: new Date().toISOString(),
+        }).eq('id', giftId);
+      } catch (err) {
+        console.warn('Supabase markGiftCollected failed, marked locally:', err);
+      }
     }
     return gift;
   }
@@ -828,7 +979,7 @@ export class DataService {
   static async logMessage(invoiceId: string, channel: 'WHATSAPP' | 'SMS' | 'COPY', status: 'PREPARED' | 'OPENED' | 'MARKED_SENT'): Promise<void> {
     const logs = getLocalData<any[]>(STORAGE_KEYS.MESSAGE_LOGS, []);
     logs.push({
-      id: 'ml_' + Math.random().toString(36).substring(2, 9),
+      id: generateUuid(),
       invoice_id: invoiceId,
       channel,
       status,
@@ -837,11 +988,15 @@ export class DataService {
     setLocalData(STORAGE_KEYS.MESSAGE_LOGS, logs);
 
     if (isSupabaseConfigured && supabase) {
-      await supabase.from('message_logs').insert({
-        invoice_id: invoiceId,
-        channel,
-        status,
-      });
+      try {
+        await supabase.from('message_logs').insert({
+          invoice_id: invoiceId,
+          channel,
+          status,
+        });
+      } catch (err) {
+        console.warn('Supabase logMessage failed, recorded locally:', err);
+      }
     }
   }
 
