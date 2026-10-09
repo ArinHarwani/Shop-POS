@@ -29,7 +29,7 @@ export const STRINGS = {
   clearBillConfirmText: 'All garments added to this bill will be removed.',
   clearBillYes: 'Yes, clear bill',
   clearBillNo: 'Keep bill',
-  emptyBillPrompt: 'Type an item number above and tap Add.',
+  emptyBillPrompt: 'Enter article name and amount above, then tap Add.',
   removeBtn: 'Remove',
   totalLabel: 'Total',
   nextBtn: 'Next',

@@ -30,7 +30,7 @@ export function ItemRow({
       <div className="flex items-baseline justify-between gap-2 w-full min-w-0">
         <div className="flex-1 min-w-0">
           <span className="font-semibold text-[#1A1A1A] text-[17px] inline-block mr-2">{name}</span>
-          <span className="text-[#6B6B6B] text-[15px] whitespace-nowrap">#{itemNumber}</span>
+          {itemNumber ? <span className="text-[#6B6B6B] text-[15px] whitespace-nowrap">#{itemNumber}</span> : null}
         </div>
         <div className="font-bold text-[#1A1A1A] text-[17px] whitespace-nowrap text-right shrink-0">
           {formatRupees(lineTotal)}

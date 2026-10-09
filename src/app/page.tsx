@@ -30,8 +30,14 @@ export default function SellPage() {
   // Cart state
   const [cart, setCart] = useState<{ product: Product; quantity: number }[]>([]);
   const [soldItems, setSoldItems] = useState<{ product: Product; quantity: number }[]>([]);
-  const [itemInput, setItemInput] = useState('');
+  const [articleName, setArticleName] = useState('');
+  const [articlePrice, setArticlePrice] = useState<number | ''>('');
+  const [itemBarcode, setItemBarcode] = useState('');
   const [itemError, setItemError] = useState<string | null>(null);
+
+  const articleNameRef = useRef<HTMLInputElement>(null);
+  const priceRef = useRef<HTMLInputElement>(null);
+  const barcodeRef = useRef<HTMLInputElement>(null);
 
   // Attached voucher & manual discount
   const [attachedVoucher, setAttachedVoucher] = useState<{
@@ -69,7 +75,6 @@ export default function SellPage() {
   } | null>(null);
 
   const [copied, setCopied] = useState(false);
-  const itemInputRef = useRef<HTMLInputElement>(null);
 
   // Load saved cart and attached voucher from localStorage on mount (never lose work)
   useEffect(() => {
@@ -104,9 +109,9 @@ export default function SellPage() {
       // ignore JSON parse error
     }
 
-    // Auto focus item input
+    // Auto focus article name input
     setTimeout(() => {
-      itemInputRef.current?.focus();
+      articleNameRef.current?.focus();
     }, 100);
   }, []);
 
@@ -141,55 +146,80 @@ export default function SellPage() {
   const eligibleAmount = calculateEligibleAmount(subtotal, manualDiscount, voucherDiscount);
   const rewardEval = evaluateRewards(eligibleAmount, DEFAULT_OFFER_TIERS);
 
-  // Add Item to Bill
+  // Simple Rapid Add to Bill: Article Name + Amount + optional Barcode
   const handleAddItem = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setItemError(null);
-    const query = itemInput.trim().toLowerCase();
-    if (!query) return;
 
-    const found = await DataService.getProductByItemNumber(query);
-    if (!found) {
-      setItemError(`Garment #${itemInput.trim()} not found in inventory.`);
+    const cleanName = articleName.trim();
+    const numPrice = typeof articlePrice === 'number' ? articlePrice : parseInt(String(articlePrice), 10);
+    const cleanBarcode = itemBarcode.trim();
+
+    if (!cleanName) {
+      setItemError('Please enter article name (e.g. Top, Dress, Kurti).');
+      articleNameRef.current?.focus();
       return;
     }
 
-    if (found.quantity_on_hand <= 0) {
-      setItemError(STRINGS.itemSoldOutError);
+    if (isNaN(numPrice) || numPrice <= 0) {
+      setItemError('Please enter the amount / price.');
+      priceRef.current?.focus();
       return;
     }
 
-    const existing = cart.find((item) => item.product.id === found.id);
-    const inCartQty = existing ? existing.quantity : 0;
-    if (inCartQty + 1 > found.quantity_on_hand) {
-      setItemError(`Only ${found.quantity_on_hand} in stock for #${found.item_number} (${inCartQty} already in bill).`);
-      return;
+    // Check if garment exists in catalogue with this barcode
+    let prod: Product | null = null;
+    if (cleanBarcode) {
+      prod = await DataService.getProductByItemNumber(cleanBarcode);
     }
 
+    if (!prod) {
+      // Check if matching garment already in current bill
+      const inCart = cart.find(
+        (c) =>
+          c.product.name.toLowerCase() === cleanName.toLowerCase() &&
+          c.product.price === numPrice
+      );
+      if (inCart) {
+        prod = inCart.product;
+      }
+    }
+
+    if (!prod) {
+      // Create and save to local catalogue with abundant stock so staff is never blocked
+      const assignedItemNumber = cleanBarcode || String(Math.floor(100000 + Math.random() * 900000));
+      prod = await DataService.addOrUpdateProduct({
+        item_number: assignedItemNumber,
+        name: cleanName,
+        price: numPrice,
+        quantity_on_hand: 99999,
+        category: 'General',
+        size: 'Free Size',
+        color: 'Standard',
+      });
+    }
+
+    // Add / increment in cart
     setCart((prev) => {
-      const idx = prev.findIndex((item) => item.product.id === found.id);
+      const idx = prev.findIndex((item) => item.product.id === prod!.id);
       if (idx >= 0) {
         return prev.map((item, i) =>
           i === idx ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      return [...prev, { product: found, quantity: 1 }];
+      return [...prev, { product: prod!, quantity: 1 }];
     });
 
-    setItemInput('');
-    itemInputRef.current?.focus();
+    // Reset inputs and keep focus on article name for next item
+    setArticleName('');
+    setArticlePrice('');
+    setItemBarcode('');
+    setItemError(null);
+    articleNameRef.current?.focus();
   };
 
   const handleUpdateQty = (productId: string, delta: number) => {
     setItemError(null);
-    const item = cart.find((c) => c.product.id === productId);
-    if (!item) return;
-
-    if (delta > 0 && item.quantity >= item.product.quantity_on_hand) {
-      setItemError(`Only ${item.product.quantity_on_hand} in stock for #${item.product.item_number}.`);
-      return;
-    }
-
     setCart((prev) =>
       prev
         .map((it) => {
@@ -218,7 +248,7 @@ export default function SellPage() {
     setCart([]);
     clearSavedCart();
     setShowClearConfirm(false);
-    itemInputRef.current?.focus();
+    articleNameRef.current?.focus();
   };
 
   // Step 1 -> Step 2
@@ -306,6 +336,10 @@ export default function SellPage() {
   const handleStartNewSale = () => {
     setCart([]);
     setSoldItems([]);
+    setArticleName('');
+    setArticlePrice('');
+    setItemBarcode('');
+    setItemError(null);
     setPhone('');
     setCustomerName('');
     setInstagramId('');
@@ -318,7 +352,7 @@ export default function SellPage() {
     setCompletedSale(null);
     setStep('cart');
     setTimeout(() => {
-      itemInputRef.current?.focus();
+      articleNameRef.current?.focus();
     }, 100);
   };
 
@@ -373,24 +407,92 @@ export default function SellPage() {
                 )}
               </div>
 
-              {/* Large Item Number Box + Add Button */}
-              <form onSubmit={handleAddItem} className="flex gap-2 items-start w-full">
-                <div className="flex-1 min-w-0">
-                  <NumberField
-                    ref={itemInputRef}
-                    value={itemInput}
-                    onChange={(e) => {
-                      setItemInput(e.target.value);
-                      setItemError(null);
-                    }}
-                    placeholder={STRINGS.itemNumberPlaceholder}
-                    error={itemError}
-                    autoFocus
-                  />
+              {/* Direct Bill Entry: Article Name, Amount, Barcode (optional) */}
+              <form
+                onSubmit={handleAddItem}
+                className="bg-[#F6F6F4] p-3.5 sm:p-4 rounded-[8px] border border-[#E6E6E6] flex flex-col gap-3 w-full"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[13px] font-semibold text-[#1A1A1A] block mb-1">
+                      Article Name <span className="text-[#B91C1C]">*</span>
+                    </label>
+                    <input
+                      ref={articleNameRef}
+                      type="text"
+                      value={articleName}
+                      onChange={(e) => {
+                        setArticleName(e.target.value);
+                        setItemError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && articleName.trim() && !articlePrice) {
+                          e.preventDefault();
+                          priceRef.current?.focus();
+                        }
+                      }}
+                      placeholder="e.g. Top, Dress, Kurti"
+                      className="w-full h-[46px] px-3 rounded-[6px] border border-[#D1D5DB] bg-white text-[16px] text-[#1A1A1A] focus:outline-none focus:border-[#1A1A1A]"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[13px] font-semibold text-[#1A1A1A] block mb-1">
+                      Amount (₹) <span className="text-[#B91C1C]">*</span>
+                    </label>
+                    <input
+                      ref={priceRef}
+                      type="number"
+                      min="0"
+                      value={articlePrice}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setArticlePrice(val === '' ? '' : parseInt(val, 10));
+                        setItemError(null);
+                      }}
+                      placeholder="e.g. 450"
+                      className="w-full h-[46px] px-3 rounded-[6px] border border-[#D1D5DB] bg-white text-[16px] text-[#1A1A1A] focus:outline-none focus:border-[#1A1A1A]"
+                    />
+                  </div>
                 </div>
-                <Button type="submit" variant="primary" className="shrink-0 px-5">
-                  {STRINGS.addItemBtn}
-                </Button>
+
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1 min-w-0">
+                    <label className="text-[13px] font-medium text-[#6B6B6B] block mb-1">
+                      Barcode / Item # <span className="text-[12px] text-[#9CA3AF]">(optional)</span>
+                    </label>
+                    <input
+                      ref={barcodeRef}
+                      type="text"
+                      value={itemBarcode}
+                      onChange={async (e) => {
+                        const code = e.target.value;
+                        setItemBarcode(code);
+                        setItemError(null);
+                        if (code.trim()) {
+                          const found = await DataService.getProductByItemNumber(code.trim());
+                          if (found) {
+                            setArticleName(found.name);
+                            setArticlePrice(found.price);
+                          }
+                        }
+                      }}
+                      placeholder="Scan or type barcode"
+                      className="w-full h-[46px] px-3 rounded-[6px] border border-[#D1D5DB] bg-white text-[16px] text-[#1A1A1A] focus:outline-none focus:border-[#1A1A1A]"
+                    />
+                  </div>
+
+                  <Button type="submit" variant="primary" className="h-[46px] px-6 shrink-0 font-semibold text-[16px]">
+                    + Add
+                  </Button>
+                </div>
+
+                {itemError && (
+                  <div className="text-[13px] font-semibold text-[#B91C1C]">
+                    {itemError}
+                  </div>
+                )}
               </form>
 
               {/* Bill List: One row per item */}
