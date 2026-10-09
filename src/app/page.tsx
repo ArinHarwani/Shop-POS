@@ -89,11 +89,7 @@ export default function SellPage() {
         }))
       );
     } else {
-      // Seed with 2 fixture items if empty so user immediately sees a clean bill preview
-      setCart([
-        { product: FIXTURE_PRODUCTS[0], quantity: 1 }, // 450
-        { product: FIXTURE_PRODUCTS[1], quantity: 1 }, // 400 = 850 total
-      ]);
+      setCart([]);
     }
 
     try {
