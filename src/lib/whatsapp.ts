@@ -134,7 +134,9 @@ export function buildWhatsAppMessage(options: BuildMessageOptions): string {
       rewardsLines += '\nT&C: Redeemable in-store only. One-time use. Non-refundable.';
     }
 
-    return `${messageHeader}${itemLines}${summaryLines}${rewardsLines}`;
+    const instagramPromo = '\n\nCheck out more from our exclusive collection:\nhttps://www.instagram.com/fever.profilefashion?utm_source=ig_web_button_share_sheet&xtok=ZDNlZDc0MzIxNw==';
+
+    return `${messageHeader}${itemLines}${summaryLines}${rewardsLines}${instagramPromo}`;
   };
 
   let fullMessage = buildBody();

@@ -30,3 +30,11 @@ yarn-error.log*
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Tooling and profiles
+.edge-profile/
+.edge-profile-pos/
+test.html
+test_edge.js
+capture.js
+cdp_capture.js

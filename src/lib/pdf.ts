@@ -165,12 +165,16 @@ export function generateInvoicePdf(options: GenerateInvoicePdfOptions): jsPDF {
     y += 6;
   }
 
-  // Footer / Thank You
+  // Footer / Thank You & Instagram Link
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Thank you for shopping with FEVER!', pageWidth / 2, y + 6, { align: 'center' });
+  doc.text('Check out more from our exclusive collection:', pageWidth / 2, y + 10, { align: 'center' });
+  doc.setTextColor(31, 58, 95); // Muted accent
+  doc.text('https://www.instagram.com/fever.profilefashion', pageWidth / 2, y + 14, { align: 'center' });
   doc.setTextColor(148, 163, 184);
-  doc.text('Thank you for celebrating fashion with FEVER!', pageWidth / 2, y + 6, { align: 'center' });
-  doc.text('For returns or exchanges, please produce this bill within 7 days at our store.', pageWidth / 2, y + 10, { align: 'center' });
+  doc.text('For returns or exchanges, please produce this bill within 7 days at our store.', pageWidth / 2, y + 19, { align: 'center' });
 
   return doc;
 }
