@@ -39,6 +39,7 @@ export interface FixtureVoucher {
   status: 'VALID' | 'USED' | 'EXPIRED' | 'NOT_FOUND';
   face_value: number;
   used_at?: string;
+  expires_at?: string;
   min_purchase?: number;
 }
 
@@ -53,9 +54,9 @@ export const FIXTURE_PRODUCTS: FixtureProduct[] = [
 ];
 
 export const FIXTURE_VOUCHERS: Record<string, FixtureVoucher> = {
-  'TRD-K7M2-9QXA': { code: 'TRD-K7M2-9QXA', status: 'VALID', face_value: 300, min_purchase: 3000 },
-  'TRD-H4P8-2WZC': { code: 'TRD-H4P8-2WZC', status: 'USED', face_value: 300, used_at: '09 Oct 2026, 11:20 AM' },
-  'TRD-EXPD-9999': { code: 'TRD-EXPD-9999', status: 'EXPIRED', face_value: 300 },
+  'TRD-K7M2-9QXA': { code: 'TRD-K7M2-9QXA', status: 'VALID', face_value: 250, min_purchase: 3000, expires_at: '2026-11-11T18:29:59.999Z' },
+  'TRD-H4P8-2WZC': { code: 'TRD-H4P8-2WZC', status: 'USED', face_value: 350, used_at: '09 Oct 2026', min_purchase: 3000, expires_at: '2026-11-09T18:29:59.999Z' },
+  'TRD-EXPD-9999': { code: 'TRD-EXPD-9999', status: 'EXPIRED', face_value: 500, min_purchase: 3000, expires_at: '2026-10-08T18:29:59.999Z' },
 };
 
 export const FIXTURE_TODAY_BILLS: FixtureBill[] = [
@@ -64,12 +65,12 @@ export const FIXTURE_TODAY_BILLS: FixtureBill[] = [
     bill_number: 'TR-0123',
     time: '11:42 AM',
     items_count: 3,
-    total: 1350,
+    total: 1550,
     payment_mode: 'UPI',
     customer_phone: '+919876543210',
     customer_name: 'Priya Sharma',
-    vouchers_earned: ['TRD-K7M2-9QXA', 'TRD-W2M9-4VKA'],
-    gift_earned: 'Trendy Collection Gift',
+    vouchers_earned: ['TRD-K7M2-9QXA'],
+    gift_earned: 'Small gift',
     gift_claimed: true,
   },
   {
@@ -81,8 +82,8 @@ export const FIXTURE_TODAY_BILLS: FixtureBill[] = [
     payment_mode: 'Cash',
     customer_phone: '+919822334455',
     customer_name: 'Ananya Verma',
-    vouchers_earned: ['TRD-P8R2-7XLA'],
-    gift_earned: 'Trendy Collection Gift',
+    vouchers_earned: [],
+    gift_earned: 'Small gift',
     gift_claimed: false, // Gift waiting!
   },
   {

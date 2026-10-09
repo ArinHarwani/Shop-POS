@@ -3,7 +3,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { STRINGS, formatRupees } from '@/lib/strings';
 import { FIXTURE_PRODUCTS, FixtureProduct, FixtureBillItem } from '@/lib/fixtures';
-import { calculateEligibleAmount, evaluateRewards } from '@/lib/rewards';
+import {
+  DEFAULT_OFFER_TIERS,
+  calculateEligibleAmount,
+  evaluateRewards,
+  calculateVoucherExpiry,
+  formatIstDate,
+  formatVoucherPrintLine,
+  generateClientVoucherCode,
+} from '@/lib/rewards';
 import { Button } from '@/components/ui/Button';
 import { TextField, NumberField } from '@/components/ui/TextField';
 import { ItemRow } from '@/components/ui/ItemRow';
@@ -23,6 +31,15 @@ export default function SellPage() {
   const [itemInput, setItemInput] = useState('');
   const [itemError, setItemError] = useState<string | null>(null);
 
+  // Attached voucher & manual discount
+  const [attachedVoucher, setAttachedVoucher] = useState<{
+    code: string;
+    face_value: number;
+    expires_at?: string;
+    min_purchase?: number;
+  } | null>(null);
+  const [manualDiscount, setManualDiscount] = useState<number>(0);
+
   // Customer & Payment state
   const [phone, setPhone] = useState('');
   const [phoneError, setPhoneError] = useState<string | null>(null);
@@ -40,8 +57,11 @@ export default function SellPage() {
   const [completedSale, setCompletedSale] = useState<{
     billNumber: string;
     total: number;
+    subtotal: number;
+    discountAmount: number;
+    voucherDeduction: number;
     paymentMode: string;
-    vouchers: { code: string; face_value: number }[];
+    vouchers: { code: string; face_value: number; expires_at: string }[];
     gift: string | null;
     giftClaimed: boolean;
   } | null>(null);
@@ -49,7 +69,7 @@ export default function SellPage() {
   const [copied, setCopied] = useState(false);
   const itemInputRef = useRef<HTMLInputElement>(null);
 
-  // Load saved cart from localStorage on mount (never lose work)
+  // Load saved cart and attached voucher from localStorage on mount (never lose work)
   useEffect(() => {
     const saved = getSavedCart();
     if (saved && saved.length > 0) {
@@ -76,6 +96,15 @@ export default function SellPage() {
       ]);
     }
 
+    try {
+      const savedVoucher = localStorage.getItem('attached_voucher');
+      if (savedVoucher) {
+        setAttachedVoucher(JSON.parse(savedVoucher));
+      }
+    } catch {
+      // ignore JSON parse error
+    }
+
     // Auto focus item input
     setTimeout(() => {
       itemInputRef.current?.focus();
@@ -99,16 +128,19 @@ export default function SellPage() {
 
   // Calculations
   const subtotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  const eligibleAmount = calculateEligibleAmount(subtotal, 0, 0);
+  const merchandiseTotal = Math.max(0, subtotal - manualDiscount);
 
-  // Dynamic reward evaluation using standard PRD tiers (500, 800, 1300)
-  const defaultTiers = [
-    { id: 't0', name: 'Standard', threshold: 0, voucher_count: 0, voucher_value: 300, gift_count: 0, is_active: true },
-    { id: 't1', name: 'Silver', threshold: 500, voucher_count: 1, voucher_value: 300, gift_count: 0, min_purchase: 3000, is_active: true },
-    { id: 't2', name: 'Gold', threshold: 800, voucher_count: 1, voucher_value: 300, gift_count: 1, gift_description: 'Trendy Collection Gift', min_purchase: 3000, is_active: true },
-    { id: 't3', name: 'Platinum', threshold: 1300, voucher_count: 2, voucher_value: 300, gift_count: 1, gift_description: 'Trendy Collection Gift', min_purchase: 3000, is_active: true },
-  ];
-  const rewardEval = evaluateRewards(eligibleAmount, defaultTiers);
+  // Attached voucher qualification
+  const minPurchase = attachedVoucher?.min_purchase ?? 3000;
+  const isVoucherUnderMin = attachedVoucher ? merchandiseTotal < minPurchase : false;
+  const voucherShortfall = attachedVoucher && isVoucherUnderMin ? minPurchase - merchandiseTotal : 0;
+  const voucherDiscount = attachedVoucher && !isVoucherUnderMin ? attachedVoucher.face_value : 0;
+  const payableTotal = Math.max(0, merchandiseTotal - voucherDiscount);
+
+  // The eligible amount A for NEW offers on that same bill:
+  // merchandise total after discount and after voucher is subtracted
+  const eligibleAmount = calculateEligibleAmount(subtotal, manualDiscount, voucherDiscount);
+  const rewardEval = evaluateRewards(eligibleAmount, DEFAULT_OFFER_TIERS);
 
   // Add Item to Bill
   const handleAddItem = (e?: React.FormEvent) => {
@@ -160,6 +192,13 @@ export default function SellPage() {
     setCart((prev) => prev.filter((item) => item.product.id !== productId));
   };
 
+  const handleRemoveAttachedVoucher = () => {
+    setAttachedVoucher(null);
+    try {
+      localStorage.removeItem('attached_voucher');
+    } catch {}
+  };
+
   const handleClearBill = () => {
     setCart([]);
     clearSavedCart();
@@ -173,11 +212,19 @@ export default function SellPage() {
       setItemError('Add at least one item to proceed.');
       return;
     }
+    if (isVoucherUnderMin) {
+      setItemError(`Add Rs ${voucherShortfall.toLocaleString('en-IN')} more to use this voucher.`);
+      return;
+    }
     setStep('payment');
   };
 
   // Step 2 -> Confirmation
   const handleValidateBeforeConfirm = () => {
+    if (isVoucherUnderMin) {
+      setPhoneError(`Add Rs ${voucherShortfall.toLocaleString('en-IN')} more to use this voucher.`);
+      return;
+    }
     setPhoneError(null);
     const cleanPhone = phone.replace(/\D/g, '');
     if (cleanPhone.length < 10) {
@@ -193,22 +240,36 @@ export default function SellPage() {
 
     // Build completed sale summary
     const newBillNumber = `TR-${String(Math.floor(1000 + Math.random() * 9000))}`;
-    const generatedVouchers: { code: string; face_value: number }[] = [];
+    const generatedVouchers: { code: string; face_value: number; expires_at: string }[] = [];
     if (rewardEval.voucherCount > 0) {
+      const expIso = calculateVoucherExpiry(new Date(), 30).toISOString();
       for (let i = 0; i < rewardEval.voucherCount; i++) {
-        const randCode = 'TRD-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
-        generatedVouchers.push({ code: randCode, face_value: 300 });
+        generatedVouchers.push({
+          code: generateClientVoucherCode(),
+          face_value: rewardEval.voucherValue,
+          expires_at: expIso,
+        });
       }
     }
 
     setCompletedSale({
       billNumber: newBillNumber,
-      total: subtotal,
+      total: payableTotal,
+      subtotal,
+      discountAmount: manualDiscount,
+      voucherDeduction: voucherDiscount,
       paymentMode,
       vouchers: generatedVouchers,
-      gift: rewardEval.giftCount > 0 ? (rewardEval.giftDescription || 'Trendy Collection Gift') : null,
+      gift: rewardEval.giftCount > 0 ? (rewardEval.giftDescription || 'Small gift') : null,
       giftClaimed: giftHandedOver,
     });
+
+    if (attachedVoucher) {
+      try {
+        localStorage.removeItem('attached_voucher');
+      } catch {}
+      setAttachedVoucher(null);
+    }
 
     clearSavedCart();
     setStep('done');
@@ -220,6 +281,11 @@ export default function SellPage() {
     setCustomerName('');
     setInstagramId('');
     setMarketingConsent(false);
+    setManualDiscount(0);
+    setAttachedVoucher(null);
+    try {
+      localStorage.removeItem('attached_voucher');
+    } catch {}
     setCompletedSale(null);
     setStep('cart');
     setTimeout(() => {
@@ -229,17 +295,28 @@ export default function SellPage() {
 
   // Helper text for reward line
   let rewardLineText = '';
-  if (rewardEval.voucherCount > 0 && rewardEval.giftCount > 0) {
-    rewardLineText = `${rewardEval.voucherCount} vouchers + 1 gift earned`;
-  } else if (rewardEval.voucherCount > 0) {
-    rewardLineText = `${formatRupees(rewardEval.currentTier?.threshold || 500)} reached: ${rewardEval.voucherCount} voucher of Rs 300`;
+  if (rewardEval.currentTier) {
+    if (rewardEval.voucherCount > 0 && rewardEval.giftCount > 0) {
+      rewardLineText = `Rs ${rewardEval.currentTier.threshold.toLocaleString('en-IN')} reached: Rs ${rewardEval.voucherValue} voucher + ${rewardEval.giftDescription || 'Small gift'} earned`;
+    } else if (rewardEval.voucherCount > 0) {
+      rewardLineText = `Rs ${rewardEval.currentTier.threshold.toLocaleString('en-IN')} reached: Rs ${rewardEval.voucherValue} voucher earned`;
+    } else if (rewardEval.giftCount > 0) {
+      rewardLineText = `Rs ${rewardEval.currentTier.threshold.toLocaleString('en-IN')} reached: ${rewardEval.giftDescription || 'Small gift'} earned`;
+    }
   }
 
-  if (rewardEval.amountNeededForNextTier > 0) {
+  if (rewardEval.amountNeededForNextTier > 0 && rewardEval.nextTier) {
+    const nextRewardDesc =
+      rewardEval.nextTier.voucher_count > 0 && rewardEval.nextTier.gift_count > 0
+        ? `Rs ${rewardEval.nextTier.voucher_value} voucher + Small gift`
+        : rewardEval.nextTier.voucher_count > 0
+        ? `voucher of Rs ${rewardEval.nextTier.voucher_value}`
+        : `${rewardEval.nextTier.gift_description || 'Small gift'}`;
+
     if (rewardLineText) {
-      rewardLineText += ` • Add ${formatRupees(rewardEval.amountNeededForNextTier)} more to get a gift`;
+      rewardLineText += ` • Add ${formatRupees(rewardEval.amountNeededForNextTier)} more to get ${nextRewardDesc}`;
     } else {
-      rewardLineText = `Add ${formatRupees(rewardEval.amountNeededForNextTier)} more to get a voucher of Rs 300`;
+      rewardLineText = `Add ${formatRupees(rewardEval.amountNeededForNextTier)} more to get ${nextRewardDesc}`;
     }
   }
 
@@ -309,6 +386,33 @@ export default function SellPage() {
                 )}
               </div>
 
+              {/* Attached Voucher Bar / Warning */}
+              {attachedVoucher && (
+                <div className={`p-3 rounded-[8px] border text-[15px] flex items-center justify-between ${
+                  isVoucherUnderMin
+                    ? 'bg-[#FEF3C7] text-[#B45309] border-[#FDE68A] font-semibold'
+                    : 'bg-[#DCFCE7] text-[#15803D] border-[#86EFAC] font-medium'
+                }`}>
+                  <div className="flex flex-col">
+                    {isVoucherUnderMin ? (
+                      <span>Add Rs {voucherShortfall.toLocaleString('en-IN')} more to use this voucher</span>
+                    ) : (
+                      <span>Voucher {attachedVoucher.code} applied (-Rs {voucherDiscount})</span>
+                    )}
+                    <span className="text-[12px] opacity-80 font-normal">
+                      Min bill: Rs 3,000 in-store purchase
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveAttachedVoucher}
+                    className="text-[13px] underline ml-2 shrink-0 font-medium hover:opacity-75"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+
               {/* Thin Reward Line in light grey panel (#F6F6F4) */}
               {cart.length > 0 && rewardLineText && (
                 <div className="bg-[#F6F6F4] p-3 rounded-[8px] border border-[#E6E6E6] text-[15px] text-[#1A1A1A] leading-snug break-words">
@@ -317,12 +421,12 @@ export default function SellPage() {
               )}
             </div>
 
-            {/* Sticky Bottom Area: Total Rs 1,350 + Full Width "Next" */}
+            {/* Sticky Bottom Area: Total + Full Width "Next" */}
             <TotalBar
-              total={subtotal}
+              total={payableTotal}
               actionText={STRINGS.nextBtn}
               onAction={handleNextToPayment}
-              disabled={cart.length === 0}
+              disabled={cart.length === 0 || isVoucherUnderMin}
             />
           </div>
         )}
@@ -346,6 +450,33 @@ export default function SellPage() {
                   {STRINGS.backBtn}
                 </button>
               </div>
+
+              {/* Attached Voucher notice on Payment screen as well */}
+              {attachedVoucher && (
+                <div className={`p-3 rounded-[8px] border text-[15px] flex items-center justify-between ${
+                  isVoucherUnderMin
+                    ? 'bg-[#FEF3C7] text-[#B45309] border-[#FDE68A] font-semibold'
+                    : 'bg-[#DCFCE7] text-[#15803D] border-[#86EFAC] font-medium'
+                }`}>
+                  <div className="flex flex-col">
+                    {isVoucherUnderMin ? (
+                      <span>Add Rs {voucherShortfall.toLocaleString('en-IN')} more to use this voucher</span>
+                    ) : (
+                      <span>Voucher {attachedVoucher.code} applied (-Rs {voucherDiscount})</span>
+                    )}
+                    <span className="text-[12px] opacity-80 font-normal">
+                      Min bill: Rs 3,000 in-store purchase
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveAttachedVoucher}
+                    className="text-[13px] underline ml-2 shrink-0 font-medium hover:opacity-75"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
 
               {/* WhatsApp Number (Required) */}
               <NumberField
@@ -431,9 +562,10 @@ export default function SellPage() {
 
             {/* Bottom TotalBar: Complete Sale */}
             <TotalBar
-              total={subtotal}
+              total={payableTotal}
               actionText={STRINGS.completeSaleBtn}
               onAction={handleValidateBeforeConfirm}
+              disabled={isVoucherUnderMin}
             />
           </div>
         )}
@@ -465,12 +597,16 @@ export default function SellPage() {
                 </div>
 
                 {completedSale.vouchers.length > 0 && (
-                  <div className="flex flex-col gap-1 pt-1 border-t border-[#E6E6E6]">
-                    <span className="text-[#6B6B6B] text-[15px]">{STRINGS.vouchersEarnedLabel}:</span>
+                  <div className="flex flex-col gap-1.5 pt-2 border-t border-[#E6E6E6]">
+                    <span className="text-[#6B6B6B] text-[14px] font-medium">{STRINGS.vouchersEarnedLabel}:</span>
                     {completedSale.vouchers.map((v) => (
-                      <div key={v.code} className="flex justify-between text-[15px] font-semibold text-[#1A1A1A]">
-                        <span>{v.code}</span>
-                        <span>{formatRupees(v.face_value)} off</span>
+                      <div key={v.code} className="text-[13px] font-semibold text-[#15803D] bg-[#DCFCE7] p-2.5 rounded-[6px] border border-[#86EFAC] break-words">
+                        {formatVoucherPrintLine({
+                          code: v.code,
+                          face_value: v.face_value,
+                          expires_at: v.expires_at,
+                          min_purchase: 3000,
+                        })}
                       </div>
                     ))}
                   </div>
@@ -521,6 +657,8 @@ export default function SellPage() {
                         source_invoice_id: '',
                         customer_id: '',
                         face_value: v.face_value,
+                        expires_at: v.expires_at,
+                        min_purchase: 3000,
                         status: 'ISSUED',
                       })),
                       gift: completedSale.gift ? { id: 'g', source_invoice_id: '', customer_id: '', description: completedSale.gift, status: completedSale.giftClaimed ? 'COLLECTED' : 'PENDING_COLLECTION' } : null,
@@ -566,6 +704,16 @@ export default function SellPage() {
                         name: customerName,
                         marketing_consent: marketingConsent,
                       },
+                      vouchers: completedSale.vouchers.map((v) => ({
+                        id: v.code,
+                        code: v.code,
+                        source_invoice_id: '',
+                        customer_id: '',
+                        face_value: v.face_value,
+                        expires_at: v.expires_at,
+                        min_purchase: 3000,
+                        status: 'ISSUED',
+                      })),
                     });
                     if (completedSale.vouchers.length > 0) {
                       downloadVoucherPng({
@@ -574,6 +722,8 @@ export default function SellPage() {
                         source_invoice_id: '',
                         customer_id: '',
                         face_value: completedSale.vouchers[0].face_value,
+                        expires_at: completedSale.vouchers[0].expires_at,
+                        min_purchase: 3000,
                         status: 'ISSUED',
                       });
                     }

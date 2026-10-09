@@ -65,7 +65,7 @@ export default function TodayPage() {
                     <span className="text-[#6B6B6B]">Vouchers issued:</span>
                     {selectedBill.vouchers_earned.map((c) => (
                       <span key={c} className="font-mono font-semibold text-[#1A1A1A]">
-                        {c} (Rs 300 off)
+                        {c}
                       </span>
                     ))}
                   </div>

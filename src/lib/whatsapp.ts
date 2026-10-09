@@ -1,4 +1,5 @@
 import { Invoice, InvoiceItem, Voucher, Gift } from '@/types';
+import { formatVoucherPrintLine, formatVoucherTerms } from '@/lib/rewards';
 
 /**
  * Normalizes a phone string to E.164 format.
@@ -122,16 +123,16 @@ export function buildWhatsAppMessage(options: BuildMessageOptions): string {
       rewardsLines += '\n\nYour rewards:';
       if (hasVouchers) {
         vouchers.forEach((v) => {
-          const expiryText = v.expires_at ? `, valid till ${formatDisplayDate(v.expires_at)}` : '';
-          const minText = v.min_purchase ? ` on min purchase of Rs ${v.min_purchase}` : '';
-          rewardsLines += `\n- Voucher ${v.code}: Rs ${v.face_value} off${minText}${expiryText}`;
+          rewardsLines += `\n- ${formatVoucherPrintLine(v)}`;
         });
       }
       if (hasGift) {
         const statusLabel = giftClaimed ? '(claimed)' : '(to be collected)';
         rewardsLines += `\n- Gift: ${gift.description} ${statusLabel}`;
       }
-      rewardsLines += '\nT&C: Redeemable in-store only. One-time use. Non-refundable.';
+      if (hasVouchers && vouchers.length > 0) {
+        rewardsLines += `\nT&C: ${formatVoucherTerms(vouchers[0])}`;
+      }
     }
 
     const instagramPromo = '\n\nCheck out more from our exclusive collection:\nhttps://www.instagram.com/fever.profilefashion?utm_source=ig_web_button_share_sheet&xtok=ZDNlZDc0MzIxNw==';

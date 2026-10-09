@@ -1,5 +1,6 @@
 import { Voucher } from '@/types';
 import { formatDisplayDate } from './whatsapp';
+import { formatVoucherTerms } from './rewards';
 
 /**
  * Renders a voucher onto an offscreen canvas and converts it to a PNG Blob or Data URL (DOC-2).
@@ -72,12 +73,11 @@ export async function renderVoucherCanvas(voucher: Voucher): Promise<Blob> {
   ctx.font = 'bold 28px monospace';
   ctx.fillText(voucher.code, boxX + 24, boxY + 42);
 
-  // Terms & Expiry
-  const expiryDate = voucher.expires_at ? formatDisplayDate(voucher.expires_at) : 'Valid at Jodhpur Store';
+  // Terms & Expiry (Generated strictly from fields, never typed twice)
+  const termsText = formatVoucherTerms(voucher);
   ctx.fillStyle = '#94a3b8';
   ctx.font = '13px "Inter", sans-serif';
-  ctx.fillText(`Expiry: ${expiryDate}`, 56, 330);
-  ctx.fillText('Terms: Redeemable once at store only. Not redeemable on event purchase.', 56, 352);
+  ctx.fillText(termsText, 56, 340);
 
   // Right Seal / Stamp
   ctx.save();

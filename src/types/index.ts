@@ -95,11 +95,13 @@ export interface Voucher {
   customer_id: string;
   face_value: number;
   min_purchase?: number | null;
+  valid_days?: number | null;
   status: 'ISSUED' | 'REDEEMED' | 'EXPIRED' | 'CANCELLED';
   expires_at?: string | null;
   redeemed_invoice_id?: string | null;
   redeemed_at?: string | null;
   redeemed_by?: string | null;
+  issued_at?: string;
   created_at?: string;
 }
 

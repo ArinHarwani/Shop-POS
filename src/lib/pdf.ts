@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import { Invoice, InvoiceItem, Voucher, Gift, Customer } from '@/types';
 import { formatDisplayDate } from './whatsapp';
+import { formatVoucherPrintLine } from './rewards';
 
 export interface GenerateInvoicePdfOptions {
   invoice: Invoice;
@@ -148,10 +149,8 @@ export function generateInvoicePdf(options: GenerateInvoicePdfOptions): jsPDF {
 
     if (hasVouchers) {
       vouchers.forEach((v) => {
-        doc.setFont('helvetica', 'bold');
-        doc.text(`• Code: ${v.code}`, 16, y);
         doc.setFont('helvetica', 'normal');
-        doc.text(`Rs ${v.face_value} OFF (In-store purchase Rs 3,000+)`, 56, y);
+        doc.text(`• ${formatVoucherPrintLine(v)}`, 16, y);
         y += 4.5;
       });
     }

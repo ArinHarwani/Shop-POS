@@ -15,11 +15,16 @@ Designed for stall counters: type an item number, bill it in seconds, auto-calcu
   - Historical integrity: Snapshot prices and item names are permanently frozen on invoices.
   
 - **Dynamic Tier Reward Engine (RWD-1 to RWD-3)**:
-  - Configurable tiers stored in `offer_tiers` (no hard-coded amounts in code).
-  - Evaluates the amount actually payable for merchandise (after discounts and redeemed vouchers).
-  - Highest met threshold (>=) wins (strictly non-additive: e.g. Rs 1,350 earns 2 vouchers + 1 gift, not 3 vouchers).
+  - Exactly 4 tiers configured in `offer_tiers`:
+    - Tier 1: Threshold Rs 499 -> 0 vouchers, 1 Small gift
+    - Tier 2: Threshold Rs 999 -> 1 voucher of Rs 250, 0 gifts (min purchase Rs 3,000, 30 valid days)
+    - Tier 3: Threshold Rs 1,499 -> 1 voucher of Rs 350, 1 Small gift (min purchase Rs 3,000, 30 valid days)
+    - Tier 4: Threshold Rs 1,999 -> 1 voucher of Rs 500, 0 gifts (min purchase Rs 3,000, 30 valid days)
+  - Single highest met threshold (>=) wins (strictly non-additive).
+  - Evaluates the amount actually payable for merchandise (merchandise total after manual discounts and after any voucher deduction).
   - Cryptographically unambiguous random voucher codes: `TRD-XXXX-XXXX` (excludes confusing characters `0`, `O`, `1`, `I`, `L`).
-  - Smart upsell nudges (e.g. *"Add Rs 120 more to unlock an exclusive gift!"*).
+  - Standard printed terms on all vouchers and messages: *"Valid till <date>. Use on an in-store purchase of Rs 3,000 or more. One voucher per bill. Not exchangeable for cash."*
+  - Expiry is calculated in Asia/Kolkata timezone: end of day (23:59:59 IST) of (issue date in IST + 30 calendar days).
 
 - **WhatsApp & Share Sheet Integration (SHR-1 to SHR-4)**:
   - **Primary Path (1 Tap)**: `https://wa.me/<number>?text=<encoded_invoice>` prefilled message containing line items, rates, totals, voucher codes, and gift status.
@@ -58,13 +63,13 @@ Designed for stall counters: type an item number, bill it in seconds, auto-calcu
 | # | PRD Decision | Confirmed Setting | Implementation Note |
 |---|---|---|---|
 | 1 | Item number uniqueness | Unique per garment style/tag | Text column `item_number` preserves leading zeros (e.g. `004812`). Quantity tracked via `quantity_on_hand`. |
-| 2 | Rs 300 voucher terms | Flat Rs 300 off on in-store shopping on purchase of Rs 3,000 or more | Not applicable on event purchases. Redeemable at store only. |
+| 2 | Voucher terms | Minimum purchase Rs 3,000 in-store, 30 days expiry | Dynamic per tier: Tier 2 (Rs 250 off), Tier 3 (Rs 350 off), Tier 4 (Rs 500 off). Redeemable at store only. At most 1 voucher per bill. |
 | 3 | Where and when redeemed | Store only | Standalone redemption screen at `/vouchers` for store staff. |
-| 4 | Gift item description | Small surprise gift (cup, chocolate, etc.) | Tracked as "Trendy Collection Gift" with `COLLECTED` or `PENDING_COLLECTION` states. |
+| 4 | Gift item description | Small gift | Tracked as "Small gift" with `COLLECTED` or `PENDING_COLLECTION` states. |
 | 5 | Reward threshold basis | Amount actually paid for merchandise | Subtotal minus discount minus voucher deduction. |
 | 6 | Cancellations & returns | Partial exchanges via credit note; full cancellation restores stock | Full void via `cancel_invoice` restores stock, voids unredeemed vouchers, and prevents voiding if voucher already redeemed unless owner overrides with reason. |
 | 7 | Counter hardware | 1 phone per billing counter; laptop as backup | Optimized for mobile screens, >=44px touch targets, numeric keypads (`inputMode="numeric"`), and laptop Enter-to-add shortcuts. |
-| 8 | Invoice details | FEVER & Trendy Collection branding only | No GSTIN shown. Clean fashion receipt aesthetic. |
+| 8 | Invoice details | FEVER & Trendy Collection branding only | No GSTIN shown. Clean fashion receipt aesthetic with Instagram handle. |
 | 9 | Offline billing | Online-only finalize with persistent cart | If offline, Finalize button is cleanly disabled with an informative banner. Cart survives reloads. |
 | 10| Event dates & volume | 9 to 11 Oct 2026; ~50 bills/day | Sequence starts at `TR-0001`. |
 
@@ -114,16 +119,26 @@ npm start
 
 ## 🧪 Automated Test Suite
 
-The test suite covers all acceptance tests, edge cases, and reward threshold boundaries specified in the PRD:
-- Rs 499 (0 vouchers, 0 gifts)
-- Rs 500 (1 voucher, 0 gifts)
-- Rs 799 (1 voucher, 0 gifts)
-- Rs 800 (1 voucher, 1 gift)
-- Rs 1,299 (1 voucher, 1 gift)
-- Rs 1,300 (2 vouchers, 1 gift - non-additive)
-- Rs 1,350 (2 vouchers, 1 gift)
-- Rs 900 with Rs 300 voucher redeemed (eligible Rs 600 -> 1 voucher, 0 gifts)
-- Rs 520 with Rs 40 discount (eligible Rs 480 -> 0 vouchers)
+The test suite covers all acceptance tests, edge cases, and reward threshold boundaries specified in the updated PRD:
+- Rs 498 (0 vouchers, 0 gifts)
+- Tier 1: Rs 499 (0 vouchers, 1 Small gift)
+- Rs 998 (0 vouchers, 1 Small gift)
+- Tier 2: Rs 999 (1 voucher of Rs 250, 0 gifts)
+- Rs 1,498 (1 voucher of Rs 250, 0 gifts)
+- Tier 3: Rs 1,499 (1 voucher of Rs 350, 1 Small gift)
+- Tier 4: Rs 1,999 (1 voucher of Rs 500, 0 gifts)
+- Section F mandatory tests:
+  - Redeem on a bill of Rs 2,999 -> Refused, "Add Rs 1 more"
+  - Redeem on a bill of Rs 3,000 -> Accepted; Rs 250 / 350 / 500 deducted per voucher
+  - Bill Rs 3,000 with a Rs 10 manual discount (total 2,990) -> Refused
+  - Redeem on issue date + 30 days at 23:59 IST -> Accepted
+  - Redeem at 00:01 IST next day -> Refused as expired
+  - Voucher issued at 23:50 IST and checked at 00:10 IST next day -> Expiry computed from IST issue date
+  - Two vouchers on one bill -> Refused
+  - Same voucher redeemed twice -> Exactly one succeeds
+  - Voucher from a cancelled bill -> Refused as cancelled
+  - Vouchers tab shows expired voucher -> Red "Expired" with date, no "Use" button
+  - Bill Rs 3,600 using a Rs 500 voucher (A = 3,100) -> Redeems, new offer computed on 3,100 (Tier 4: Rs 500 voucher)
 - Double-tap Finalize idempotency
 - Out-of-stock cart additions
 - Single-use voucher redemption and double-redemption blocking

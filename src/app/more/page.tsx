@@ -48,7 +48,7 @@ export default function MorePage() {
             <div className="p-4 flex items-center justify-between">
               <div>
                 <div className="font-semibold text-[#1A1A1A] text-[17px]">Reward Offer Tiers</div>
-                <div className="text-[15px] text-[#6B6B6B]">Rs 500 (1 voucher), Rs 800 (1 voucher + gift), Rs 1,300 (2 vouchers + gift)</div>
+                <div className="text-[15px] text-[#6B6B6B]">Rs 499 (gift), Rs 999 (Rs 250 voucher), Rs 1,499 (Rs 350 voucher + gift), Rs 1,999 (Rs 500 voucher)</div>
               </div>
               <span className="text-[15px] font-medium text-[#15803D]">Active</span>
             </div>

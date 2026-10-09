@@ -12,7 +12,16 @@ import {
   FinalizeResult,
   UserRole,
 } from '@/types';
-import { calculateEligibleAmount, evaluateRewards, generateClientVoucherCode } from './rewards';
+import {
+  calculateEligibleAmount,
+  evaluateRewards,
+  generateClientVoucherCode,
+  calculateVoucherExpiry,
+  validateVoucherRedemption,
+  isVoucherExpired,
+  formatIstDate,
+  DEFAULT_OFFER_TIERS,
+} from './rewards';
 import { getActiveRole } from './storage';
 
 // Local storage keys for standalone / offline operations
@@ -28,61 +37,6 @@ const STORAGE_KEYS = {
   MESSAGE_LOGS: 'trendy_db_message_logs',
   INVOICE_SEQ: 'trendy_db_invoice_seq',
 };
-
-const DEFAULT_OFFER_TIERS: OfferTier[] = [
-  {
-    id: 'tier-0',
-    name: 'Tier 0 - Standard',
-    threshold: 0,
-    voucher_count: 0,
-    voucher_value: 300,
-    gift_count: 0,
-    gift_description: null,
-    min_purchase: 3000,
-    valid_days: null,
-    terms: 'Standard shopping without rewards',
-    is_active: true,
-  },
-  {
-    id: 'tier-1',
-    name: 'Tier 1 - Silver',
-    threshold: 500,
-    voucher_count: 1,
-    voucher_value: 300,
-    gift_count: 0,
-    gift_description: null,
-    min_purchase: 3000,
-    valid_days: null,
-    terms: 'flat 300 off on in-store shopping on purchase of 3000 or more (at store only)',
-    is_active: true,
-  },
-  {
-    id: 'tier-2',
-    name: 'Tier 2 - Gold',
-    threshold: 800,
-    voucher_count: 1,
-    voucher_value: 300,
-    gift_count: 1,
-    gift_description: 'Trendy Collection Gift',
-    min_purchase: 3000,
-    valid_days: null,
-    terms: 'flat 300 off on in-store shopping on purchase of 3000 or more (at store only) + Event Gift',
-    is_active: true,
-  },
-  {
-    id: 'tier-3',
-    name: 'Tier 3 - Platinum',
-    threshold: 1300,
-    voucher_count: 2,
-    voucher_value: 300,
-    gift_count: 1,
-    gift_description: 'Trendy Collection Gift',
-    min_purchase: 3000,
-    valid_days: null,
-    terms: '2x flat 300 off on in-store shopping on purchase of 3000 or more (at store only) + Event Gift',
-    is_active: true,
-  },
-];
 
 // Initial starter collection for FEVER Trendy Collection
 const INITIAL_PRODUCTS: Product[] = [
@@ -373,27 +327,7 @@ export class DataService {
       }
     }
 
-    // 3. Validate and apply voucher if provided
-    let appliedVoucher: Voucher | null = null;
-    let voucherDiscount = 0;
-    const allVouchers = getLocalData<Voucher[]>(STORAGE_KEYS.VOUCHERS, []);
-
-    if (payload.applied_voucher_code) {
-      const codeUpper = payload.applied_voucher_code.trim().toUpperCase();
-      appliedVoucher = allVouchers.find((v) => v.code === codeUpper) || null;
-      if (!appliedVoucher) {
-        throw new Error(`Voucher ${payload.applied_voucher_code} not found`);
-      }
-      if (appliedVoucher.status !== 'ISSUED') {
-        throw new Error(`Voucher ${appliedVoucher.code} is not valid (status: ${appliedVoucher.status})`);
-      }
-      if (appliedVoucher.expires_at && new Date(appliedVoucher.expires_at) < new Date()) {
-        throw new Error(`Voucher ${appliedVoucher.code} has expired`);
-      }
-      voucherDiscount = appliedVoucher.face_value;
-    }
-
-    // 4. Calculate Subtotal, Snapshots, and Decrement Stock
+    // 3. Calculate Subtotal, Snapshots, and Decrement Stock
     let subtotal = 0;
     const invoiceItems: InvoiceItem[] = [];
     const stockMovements = getLocalData<StockMovement[]>(STORAGE_KEYS.STOCK_MOVEMENTS, []);
@@ -436,8 +370,26 @@ export class DataService {
     setLocalData(STORAGE_KEYS.PRODUCTS, products);
     setLocalData(STORAGE_KEYS.STOCK_MOVEMENTS, stockMovements);
 
-    // 5. Server-side totals recomputation
+    // 4. Validate and apply voucher if provided (Section D: min purchase checked on merchandise total after discount and before voucher)
+    let appliedVoucher: Voucher | null = null;
+    let voucherDiscount = 0;
+    const allVouchers = getLocalData<Voucher[]>(STORAGE_KEYS.VOUCHERS, []);
     const discountAmount = Math.max(0, Math.floor(payload.discount_amount || 0));
+
+    if (payload.applied_voucher_code) {
+      const codeUpper = payload.applied_voucher_code.trim().toUpperCase();
+      appliedVoucher = allVouchers.find((v) => v.code === codeUpper) || null;
+      if (!appliedVoucher) {
+        throw new Error(`Voucher code "${payload.applied_voucher_code}" not found`);
+      }
+      const valRes = validateVoucherRedemption(appliedVoucher, subtotal - discountAmount);
+      if (!valRes.valid) {
+        throw new Error(valRes.error);
+      }
+      voucherDiscount = appliedVoucher.face_value;
+    }
+
+    // 5. Server-side totals recomputation
     const grandTotal = Math.max(0, subtotal - discountAmount - voucherDiscount);
 
     // 6. Eligible Amount for Rewards
@@ -494,11 +446,9 @@ export class DataService {
           source_invoice_id: invoiceId,
           customer_id: customer.id,
           face_value: rewardEval.voucherValue,
-          min_purchase: rewardEval.currentTier?.min_purchase ?? 3000,
+          min_purchase: 3000,
           status: 'ISSUED',
-          expires_at: rewardEval.currentTier?.valid_days
-            ? new Date(Date.now() + rewardEval.currentTier.valid_days * 86400000).toISOString()
-            : null,
+          expires_at: calculateVoucherExpiry(new Date(), rewardEval.currentTier?.valid_days ?? 30).toISOString(),
           created_at: new Date().toISOString(),
         };
         allVouchers.push(newVoucher);
@@ -514,7 +464,7 @@ export class DataService {
         id: 'gift_' + Math.random().toString(36).substring(2, 9),
         source_invoice_id: invoiceId,
         customer_id: customer.id,
-        description: rewardEval.giftDescription || 'Trendy Collection Surprise Gift',
+        description: rewardEval.giftDescription || 'Small gift',
         status: payload.gift_handed_over ? 'COLLECTED' : 'PENDING_COLLECTION',
         collected_at: payload.gift_handed_over ? new Date().toISOString() : null,
         created_at: new Date().toISOString(),
@@ -679,13 +629,13 @@ export class DataService {
 
     if (!voucher) throw new Error(`Voucher code "${cleanCode}" not found`);
     if (voucher.status === 'REDEEMED') {
-      throw new Error(`Voucher ${cleanCode} was already redeemed on ${voucher.redeemed_at || 'earlier date'}`);
+      throw new Error(`This voucher was already used on ${formatIstDate(voucher.redeemed_at)}.`);
     }
     if (voucher.status === 'CANCELLED') {
-      throw new Error(`Voucher ${cleanCode} has been cancelled because the original bill was cancelled`);
+      throw new Error('This voucher is cancelled because the source bill was cancelled.');
     }
-    if (voucher.status === 'EXPIRED' || (voucher.expires_at && new Date(voucher.expires_at) < new Date())) {
-      throw new Error(`Voucher ${cleanCode} has expired`);
+    if (voucher.status === 'EXPIRED' || (voucher.expires_at && isVoucherExpired(voucher.expires_at))) {
+      throw new Error(`This voucher expired on ${formatIstDate(voucher.expires_at)}.`);
     }
 
     voucher.status = 'REDEEMED';
